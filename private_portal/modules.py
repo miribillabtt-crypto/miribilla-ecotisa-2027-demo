@@ -12,7 +12,7 @@ SPECS={
  'travel':dict(event='event',manager='s',hotel='s',hotelAddress='s',hotelPhone='s',booking='s',departureBilbao='s',departureZaragoza='s',meeting='s',plan='s',staff='staff[]',vehicles='vehicle[]',rooming='s',registrationDeadline='s',registrationStatus='s',registrationReference='s',routeUrl='url',scheduleUrl='url'),
  'result':dict(event='event',rider='runner',place='i',days='i',discipline='s',notes='s'),
  'days':dict(event='event',person='person',days='i',function='s',notes='s'),
- 'entry':dict(date='date',event='event?',direction='direction',category='s',concept='s',counterparty='s',reference='s',amount='money',status='s',notes='s'),
+ 'entry':dict(date='date',event='event?',direction='direction',category='s',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',notes='s'),
  'budget':dict(category='s',amount='money',notes='s'),
  'bank':dict(date='date',concept='s',reference='s',amount='money',direction='direction',matched='s'),
  'charge':dict(event='event',rider='runner',concept='s',amount='money',status='s',notes='s'),
@@ -51,6 +51,11 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def output(row,kind):
   data=unseal(row.data)
   if kind=='travel' and g.user.role=='runner':data={k:v for k,v in data.items() if k not in {'rooming','booking','registrationReference','staff','vehicles'}}
+  if kind=='entry':
+   data['attachments']=[]
+   for document in g.db.scalars(select(Document).where(Document.kind=='invoice:'+row.id)):
+    meta=g.db.get(Record,'invoice-meta-'+document.id);info=unseal(meta.data) if meta else {}
+    data['attachments'].append(dict(id=document.id,name=info.get('filename','factura'),size=document.size))
   return dict(data,id=row.id)
  def validate(kind,d):
   spec=SPECS[kind];out={}

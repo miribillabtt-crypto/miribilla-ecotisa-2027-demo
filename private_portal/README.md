@@ -29,7 +29,7 @@ La protección de acceso de Vercel se mantiene. El acceso al despliegue puede re
 
 No se afirma que exista auditoría externa ni cumplimiento legal certificado. Con contraseña corta y sin segundo factor, no habilitar documentación sensible sin revisar de nuevo el modelo de protección. Supabase Free no ofrece las mismas copias automáticas y recuperación que el plan de pago de Render previsto inicialmente. No se ha contratado ningún servicio de pago.
 
-Los PDF y los justificantes de factura adjuntos no están habilitados. CONTA conserva referencias y datos de las facturas. No hay cargos SEPA ni envío de correos automáticos ni publicación directa a Instagram. La importación bancaria admite CSV; no XLSX/PDF bancario en esta versión. El usuario descarga o comparte las imágenes por su propia acción.
+CONTA incorpora lectura OCR local de fotos y PDF (digitales o escaneados), revisión obligatoria, base, IVA, NIF y asignación propuesta por fecha. Los originales de factura se guardan cifrados, sin compresión ni modificación, vinculados a un apunte y con descarga solo para Dirección. Máximo 4 MB por original y 8 páginas leídas. Las cargas de PDF están habilitadas únicamente como justificantes de CONTA; no para DNI, SEPA ni otros expedientes personales. La lectura descarga dependencias fijadas de Tesseract.js 7.0.0 y PDF.js 6.5.438 desde jsDelivr; los documentos se procesan localmente y solo se envían a la aplicación al confirmar Guardar. La sesión y el CSRF protegen carga y descarga. No hay cargos SEPA ni envío de correos automáticos ni publicación directa a Instagram. La importación bancaria admite CSV; no XLSX/PDF bancario en esta versión. El usuario descarga o comparte las imágenes por su propia acción.
 
 ## Configuración
 
@@ -43,3 +43,5 @@ Vercel: framework Flask, raíz `private_portal`, entrada `app.py`, activos `publ
 `npm --prefix qa ci && node qa/check-ui.cjs` (entorno local con jsdom)
 
 Las pruebas cubren el aislamiento por rol y corredor, los flujos de archivo/restauración, protección documental por objeto, cookies, formularios, importaciones atómicas, consentimiento de fotos, convocatorias y exportación de listados sin DNI ni IBAN. Las comprobaciones DOM cubren navegación y guardado representativo; no sustituyen pruebas en móviles reales ni revisión de seguridad externa.
+
+Prueba del parser OCR: `node qa/check-ocr.cjs` tras instalar las dependencias de QA.

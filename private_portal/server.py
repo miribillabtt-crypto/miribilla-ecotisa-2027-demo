@@ -50,7 +50,7 @@ PHOTO_TYPES={'portrait','action'}
 
 def create_app(test_config=None):
     app=Flask(__name__)
-    app.config.update(MAX_CONTENT_LENGTH=9*1024*1024,TESTING=False)
+    app.config.update(MAX_CONTENT_LENGTH=5*1024*1024,TESTING=False)
     if test_config: app.config.update(test_config)
     key=app.config.get('ENCRYPTION_KEY') or os.environ.get('ENCRYPTION_KEY')
     if not key: raise RuntimeError('ENCRYPTION_KEY required')
@@ -148,7 +148,7 @@ def create_app(test_config=None):
         response.headers['X-Content-Type-Options']='nosniff'
         response.headers['Referrer-Policy']='no-referrer'
         response.headers['X-Frame-Options']='DENY'
-        response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' blob:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
         response.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
         if not app.testing:response.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
         if hasattr(g,'db'):
@@ -448,6 +448,8 @@ def create_app(test_config=None):
         seed_calendar(Sessions,Record,cipher)
     from modules import register_modules
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
+    from invoices import register_invoices
+    register_invoices(app,Record,Document,cipher,seal,unseal,audit,require)
     return app
 
 if __name__=='__main__':

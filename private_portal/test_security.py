@@ -242,3 +242,30 @@ def test_event_package_has_names_but_no_identity_or_bank(env):
  wb=load_workbook(io.BytesIO(r.data));assert set(wb.sheetnames)=={'Convocatoria','Listado hotel','Planning'}
  rendered=str([list(sheet.values) for sheet in wb]);assert 'SENSITIVE_IBAN' not in rendered and 'SENSITIVE_DNI' not in rendered
  runner,_=login('runner');assert runner.get('/api/events/'+eid+'/package').status_code==403
+
+def test_invoice_original_exact_bytes_encrypted_and_roles(env):
+ app,ids,login,_=env;c,h=login('director')
+ payload={'date':'2027-01-01','direction':'Gasto','category':'Alojamiento','concept':'Factura','counterparty':'Hotel','reference':'F1','amount':12100,'baseAmount':10000,'taxAmount':2100,'taxId':'B12345678','status':'Pendiente'}
+ result=c.post('/api/modules/entry',json=payload,headers=h);assert result.status_code==200,result.json;eid=result.json['id']
+ im=io.BytesIO();Image.new('RGB',(100,100),'green').save(im,format='JPEG',quality=87);raw=im.getvalue()
+ uploaded=c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(raw),'original.jpg')},headers=h);assert uploaded.status_code==200,uploaded.json;fid=uploaded.json['id']
+ assert c.get('/api/invoice-file/'+fid).data==raw
+ with app.extensions['db_sessions']() as db:
+  stored=db.get(Document,fid);assert stored.content!=raw;assert app.extensions['cipher'].decrypt(stored.content)==raw
+ for role in ['runner','technician','communication']:
+  other,oh=login(role);assert other.get('/api/invoice-file/'+fid).status_code==403
+  assert other.get('/api/invoices/'+eid).status_code==403
+  assert other.post('/api/invoices/'+eid,data={'file':(io.BytesIO(raw),'x.jpg')},headers=oh).status_code==403
+ # Reattaching the same original does not duplicate attachments or create another charge.
+ duplicate=c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(raw),'original.jpg')},headers=h);assert duplicate.json['duplicate']
+ entries=c.get('/api/modules/entry').json['records'];assert len(entries)==1 and len(entries[0]['attachments'])==1
+ assert entries[0]['baseAmount']==10000 and entries[0]['taxId']=='B12345678'
+
+def test_invoice_pdf_download_and_validation(env):
+ app,ids,login,_=env;c,h=login('director');r=c.post('/api/modules/entry',json={'direction':'Gasto','amount':500,'concept':'PDF'},headers=h);eid=r.json['id']
+ pdf=b'%PDF-1.7\n1 0 obj<</Type/Catalog>>endobj\n%%EOF'
+ r=c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(pdf),'factura.pdf')},headers=h);assert r.status_code==200
+ response=c.get('/api/invoice-file/'+r.json['id']);assert response.data==pdf and response.mimetype=='application/pdf';assert 'attachment;' in response.headers['Content-Disposition'];assert response.headers['Cache-Control']=='no-store'
+ assert c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(b'<html>fake</html>'),'factura.pdf')},headers=h).status_code==400
+ assert c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(b'x'*(4*1024*1024+1)),'large.jpg')},headers=h).status_code==400
+ assert c.post('/api/invoices/unknown',data={'file':(io.BytesIO(pdf),'file.pdf')},headers=h).status_code==404
