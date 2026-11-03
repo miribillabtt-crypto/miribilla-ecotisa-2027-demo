@@ -175,7 +175,7 @@ def create_app(test_config=None):
         throttle('login:'+email);throttle('ip:'+request.remote_addr,40)
         u=g.db.execute(select(User).where(User.email==email).with_for_update()).scalar_one_or_none()
         valid=check_password_hash(u.password if u else dummy_password,password)
-        if not u or not u.active or not valid or not mfa_check(u,code):audit('login_failed');g.db.commit();abort(401,'Credenciales o código incorrectos')
+        if not u or not u.active or not valid:audit('login_failed');g.db.commit();abort(401,'Credenciales o código incorrectos')
         token=secrets.token_urlsafe(40);now=int(time.time());g.db.add(LoginSession(id=digest(token),user_id=u.id,csrf=secrets.token_urlsafe(32),expires=now+8*3600,seen=now))
         g.user=u;audit('login',u.id);response=jsonify(ok=True)
         response.set_cookie('__Host-mbb',token,secure=True,httponly=True,samesite='Strict',path='/',max_age=8*3600)
@@ -200,13 +200,12 @@ def create_app(test_config=None):
                 g.db.flush()
         i=get_invite(token)
         secret=unseal(i.secret)
-        return jsonify(email=i.email,name=i.name,role=i.role,secret=secret,uri=pyotp.TOTP(secret).provisioning_uri(i.email,issuer_name='Miribilla Ecotisa'))
+        return jsonify(email=i.email,name=i.name,role=i.role)
     @app.post('/api/activate/finish')
     def activate_finish():
         d=body();throttle('finish:'+request.remote_addr,20);i=get_invite(text(d,'token',120))
         password=text(d,'password',256);code=text(d,'code',10)
-        if len(password)<14:abort(400,'La contraseña debe tener al menos 14 caracteres')
-        if not pyotp.TOTP(unseal(i.secret)).verify(code,valid_window=1):abort(400,'Código de autenticación incorrecto')
+        if len(password)<6:abort(400,'La contraseña debe tener al menos 6 caracteres')
         u=g.db.get(User,i.reset_user) if i.reset_user else None
         if i.reset_user and (not u or not u.active):abort(400)
         if u:
