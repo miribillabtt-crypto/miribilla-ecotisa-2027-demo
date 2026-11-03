@@ -2,7 +2,7 @@
 import os, io, json, hashlib, secrets, time, datetime, logging
 from functools import wraps
 from flask import Flask, request, jsonify, g, send_file, render_template, abort
-from sqlalchemy import create_engine, Column, String, Integer, Boolean, LargeBinary, Text, ForeignKey, select, func, delete, update
+from sqlalchemy import text as sql_text, create_engine, Column, String, Integer, Boolean, LargeBinary, Text, ForeignKey, select, func, delete, update
 from sqlalchemy.orm import declarative_base, sessionmaker
 from cryptography.fernet import Fernet
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -55,11 +55,17 @@ def create_app(test_config=None):
     key=app.config.get('ENCRYPTION_KEY') or os.environ.get('ENCRYPTION_KEY')
     if not key: raise RuntimeError('ENCRYPTION_KEY required')
     cipher=Fernet(key)
-    dburl=app.config.get('DATABASE_URL') or os.environ.get('DATABASE_URL')
+    dburl=app.config.get('DATABASE_URL') or os.environ.get('DATABASE_URL') or os.environ.get('POSTGRES_URL')
     if not dburl: raise RuntimeError('DATABASE_URL required')
     if dburl.startswith('postgres://'): dburl=dburl.replace('postgres://','postgresql+psycopg://',1)
     elif dburl.startswith('postgresql://'): dburl=dburl.replace('postgresql://','postgresql+psycopg://',1)
-    engine=create_engine(dburl,pool_pre_ping=True,**({'connect_args':{'check_same_thread':False}} if dburl.startswith('sqlite') else {'pool_size':3,'max_overflow':2}))
+    from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+    parts=urlsplit(dburl)
+    dburl=urlunsplit(parts._replace(query=urlencode([(k,v) for k,v in parse_qsl(parts.query) if k not in ('pgbouncer','connection_limit')])))
+    engine=create_engine(dburl,pool_pre_ping=True,**({'connect_args':{'check_same_thread':False}} if dburl.startswith('sqlite') else {'pool_size':1,'max_overflow':1,'connect_args':{'prepare_threshold':None}}))
+    if not dburl.startswith('sqlite'):
+        with engine.begin() as connection:connection.execute(sql_text('CREATE SCHEMA IF NOT EXISTS mbb_private'))
+        engine=engine.execution_options(schema_translate_map={None:'mbb_private'})
     Base.metadata.create_all(engine); Sessions=sessionmaker(bind=engine,expire_on_commit=False)
     app.extensions['db_sessions']=Sessions; app.extensions['cipher']=cipher
     dummy_password=generate_password_hash(secrets.token_urlsafe(32),method='scrypt:32768:8:1')
