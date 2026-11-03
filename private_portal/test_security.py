@@ -70,14 +70,14 @@ def test_disabling_revokes_all_sessions(env):
  assert director.post('/api/users/'+ids['runner']+'/disable',json={},headers=dh).status_code==200
  assert runner.get('/api/events').status_code==401
 
-def test_mfa_replay_rejected(env):
- app,_,login,ss=env;login('runner');c=app.test_client()
- assert c.post('/api/login',json={'email':'runner@test.invalid','password':'un-password-seguro-de-prueba','code':pyotp.TOTP(ss['runner']).now()}).status_code==401
+def test_password_only_login(env):
+ app,_,_,_=env;c=app.test_client()
+ assert c.post('/api/login',json={'email':'runner@test.invalid','password':'un-password-seguro-de-prueba'}).status_code==200
 
 def test_invite_single_use_and_no_role_escalation(env):
  app,_,login,_=env;c,h=login('director');r=c.post('/api/invites',json={'name':'New Runner','email':'new@test.invalid','role':'runner','documents':True},headers=h);assert r.status_code==200
  token=r.json['token'];a=app.test_client();setup=a.post('/api/activate/start',json={'token':token});assert setup.status_code==200
- params={'token':token,'password':'new-user-password-12345','code':pyotp.TOTP(setup.json['secret']).now(),'role':'director'}
+ params={'token':token,'password':'abcdef','role':'director'}
  assert a.post('/api/activate/finish',json=params).status_code==200
  assert a.post('/api/activate/finish',json=params).status_code==400
  with app.extensions['db_sessions']() as db:
@@ -124,3 +124,121 @@ def test_headers_and_throttling(env):
  r=c.get('/');assert r.headers['X-Frame-Options']=='DENY';assert "frame-ancestors 'none'" in r.headers['Content-Security-Policy']
  for _ in range(8):assert c.post('/api/login',json={'email':'nobody@test.invalid','password':'fake','code':'123456'}).status_code==401
  assert c.post('/api/login',json={'email':'nobody@test.invalid','password':'fake','code':'123456'}).status_code==429
+
+def test_owner_recovery_revokes_previous_password_and_sessions(env,monkeypatch):
+ from server import digest
+ app,ids,login,_=env;c,_=login('director');token='owner-reset-test-token'
+ monkeypatch.setenv('BOOTSTRAP_TOKEN_HASH',digest(token));monkeypatch.setenv('BOOTSTRAP_EXPIRES',str(int(time.time())+3600));monkeypatch.setenv('ADMIN_EMAIL','director@test.invalid')
+ guest=app.test_client();assert guest.post('/api/activate/start',json={'token':token}).status_code==200
+ assert c.get('/api/users').status_code==401
+ assert guest.post('/api/activate/finish',json={'token':token,'password':'newpass'}).status_code==200
+ assert guest.post('/api/login',json={'email':'director@test.invalid','password':'newpass'}).status_code==200
+ with app.extensions['db_sessions']() as db:assert db.get(User,ids['director']).owner
+
+def test_remember_device_sets_30_day_cookie(env):
+ app,_,_,_=env;c=app.test_client()
+ r=c.post('/api/login',json={'email':'runner@test.invalid','password':'un-password-seguro-de-prueba','remember':True})
+ assert r.status_code==200
+ assert 'Max-Age=2592000' in r.headers['Set-Cookie']
+ assert 'HttpOnly' in r.headers['Set-Cookie'] and 'Secure' in r.headers['Set-Cookie']
+
+def test_all_module_routes_require_authentication(env):
+ app,_,_,_=env;c=app.test_client()
+ for kind in ['staff','vehicle','travel','result','days','entry','budget','bank','charge','license','sport','post']:
+  assert c.get('/api/modules/'+kind).status_code==401
+  assert c.post('/api/modules/'+kind,json={}).status_code==401
+
+def test_modules_role_isolation(env):
+ _,_,login,_=env
+ for role in ['runner','technician','communication']:
+  c,h=login(role)
+  for kind in ['entry','budget','bank']:
+   assert c.get('/api/modules/'+kind).status_code==403
+   assert c.get('/api/modules/'+kind+'/export').status_code==403
+  assert c.post('/api/bank/import',json={'rows':[]},headers=h).status_code==403
+  if role!='runner':assert c.get('/api/modules/charge').status_code==403
+ comm,_=login('director_limited')
+ assert comm.get('/api/modules/entry').status_code==200
+
+def test_shared_staff_crud_archive_and_restore(env):
+ app,ids,login,_=env;c,h=login('director')
+ r=c.post('/api/modules/staff',json={'name':'Mecánico','function':'Mecánico','city':'Bilbao'},headers=h);assert r.status_code==200,r.json
+ rid=r.json['id'];tech,th=login('technician')
+ assert tech.get('/api/modules/staff').json['records'][0]['name']=='Mecánico'
+ assert tech.post('/api/modules/staff/'+rid,json={'name':'Otro'},headers=th).status_code==403
+ assert c.post('/api/modules/staff/'+rid,json={'name':'Auxiliar','function':'Auxiliar'},headers=h).status_code==200
+ assert c.post('/api/modules/staff/'+rid+'/archive',json={},headers=h).status_code==200
+ assert c.get('/api/modules/staff').json['records']==[]
+ assert c.post('/api/archive/'+rid+'/restore',json={},headers=h).status_code==200
+ assert c.get('/api/modules/staff').json['records'][0]['name']=='Auxiliar'
+
+def test_runner_receipts_only_own_and_no_money_write(env):
+ app,ids,login,_=env;c,h=login('director');c.post('/api/events',json={'name':'Trip','date':'2027-03-01'},headers=h);eid=c.get('/api/events').json['events'][0]['id']
+ for role in ['runner','runner2']:
+  response=c.post('/api/modules/charge',json={'event':eid,'rider':ids[role],'concept':'Hotel','amount':2500,'status':'Pendiente'},headers=h);assert response.status_code==200,response.json
+ r,rh=login('runner');records=r.get('/api/modules/charge').json['records'];assert len(records)==1 and records[0]['rider']==ids['runner']
+ assert r.post('/api/modules/charge/'+records[0]['id'],json={},headers=rh).status_code==403
+ from openpyxl import load_workbook
+ wb=load_workbook(io.BytesIO(r.get('/api/modules/charge/export').data));assert len(list(wb.active.values))==2
+
+def test_bank_import_atomic_and_duplicate_safe(env):
+ _,_,login,_=env;c,h=login('director')
+ row={'date':'2027-01-01','concept':'Patrocinio','reference':'A1','amount':10000,'direction':'Ingreso','matched':''}
+ invalid=dict(row,amount=-1)
+ assert c.post('/api/bank/import',json={'rows':[row,invalid]},headers=h).status_code==400
+ assert c.get('/api/modules/bank').json['records']==[]
+ assert c.post('/api/bank/import',json={'rows':[row,row]},headers=h).json['imported']==1
+ assert c.post('/api/bank/import',json={'rows':[row]},headers=h).json['imported']==0
+
+def test_runner_planning_redacts_other_guests_and_booking(env):
+ app,ids,login,_=env;c,h=login('director');c.post('/api/events',json={'name':'Trip'},headers=h);eid=c.get('/api/events').json['events'][0]['id']
+ with app.extensions['db_sessions']() as db:
+  r=db.get(Record,eid);cipher=app.extensions['cipher'];data=json.loads(cipher.decrypt(r.data));data['called']=[ids['runner']];r.data=cipher.encrypt(json.dumps(data).encode());db.commit()
+ assert c.post('/api/modules/travel',json={'event':eid,'hotel':'Hotel','booking':'PRIVATE','rooming':'OTHER GUESTS'},headers=h).status_code==200
+ runner,_=login('runner');rows=runner.get('/api/modules/travel').json['records'];assert len(rows)==1 and 'rooming' not in rows[0] and 'booking' not in rows[0]
+ other,_=login('runner2');assert other.get('/api/modules/travel').json['records']==[]
+
+def test_communication_posts_require_published_call_and_consent(env):
+ app,ids,login,_=env;director,h=login('director');director.post('/api/events',json={'name':'Race'},headers=h);eid=director.get('/api/events').json['events'][0]['id']
+ comm,ch=login('communication');post={'event':eid,'type':'Individual','riders':[ids['runner']],'template':1,'format':'Cuadrado','title':'Race','subtitle':'','status':'Aprobada'}
+ assert comm.post('/api/modules/post',json=post,headers=ch).status_code==400
+ with app.extensions['db_sessions']() as db:
+  cipher=app.extensions['cipher'];e=db.get(Record,eid);data=json.loads(cipher.decrypt(e.data));data.update(called=[ids['runner']],callStatus='Publicada');e.data=cipher.encrypt(json.dumps(data).encode());u=db.get(User,ids['runner']);u.profile=cipher.encrypt(json.dumps({'photoConsent':True}).encode());db.commit()
+ assert comm.post('/api/modules/post',json=post,headers=ch).status_code==200
+ own,_=login('runner');other,_=login('runner2');assert len(own.get('/api/modules/post').json['records'])==1;assert other.get('/api/modules/post').json['records']==[]
+ assert comm.get('/api/modules/license').status_code==403
+
+def test_bulk_invites_are_atomic_and_restricted(env):
+ app,_,login,_=env;c,h=login('director')
+ rows=[{'name':'New','email':'new@example.invalid','role':'runner'},{'name':'Bad','email':'bad','role':'root'}]
+ assert c.post('/api/invites/import',json={'rows':rows},headers=h).status_code==400
+ with app.extensions['db_sessions']() as db:assert db.scalar(select(Invite).where(Invite.email=='new@example.invalid')) is None
+ response=c.post('/api/invites/import',json={'rows':rows[:1]},headers=h);assert response.status_code==200 and len(response.json['invitations'])==1
+ tech,th=login('technician');assert tech.post('/api/invites/import',json={'rows':rows[:1]},headers=th).status_code==403
+
+def test_communication_uploads_only_consent_photos(env):
+ app,ids,login,_=env;c,h=login('communication');im=io.BytesIO();Image.new('RGB',(10,10)).save(im,format='PNG');raw=im.getvalue()
+ assert c.post('/api/documents/'+ids['runner'],data={'kind':'portrait','file':(io.BytesIO(raw),'p.png')},headers=h).status_code==403
+ with app.extensions['db_sessions']() as db:
+  u=db.get(User,ids['runner']);u.profile=app.extensions['cipher'].encrypt(json.dumps({'photoConsent':True}).encode());db.commit()
+ assert c.post('/api/documents/'+ids['runner'],data={'kind':'portrait','file':(io.BytesIO(raw),'p.png')},headers=h).status_code==200
+ assert c.post('/api/documents/'+ids['runner'],data={'kind':'dni','file':(io.BytesIO(raw),'dni.png')},headers=h).status_code==403
+
+def test_calendar_restore_preserves_existing_and_is_idempotent(env):
+ from calendar_seed import seed_calendar,RACES
+ app,_,_,_=env;S=app.extensions['db_sessions'];cipher=app.extensions['cipher']
+ with S.begin() as db:db.add(Record(id='real-event',kind='event',owner_id='direction',data=cipher.encrypt(json.dumps({'name':'Albi','date':'2027-03-15','called':['test']}).encode())))
+ seed_calendar(S,Record,cipher);seed_calendar(S,Record,cipher)
+ with S() as db:
+  records=list(db.scalars(select(Record).where(Record.kind=='event')));assert len(records)==len(RACES)
+  assert json.loads(cipher.decrypt(db.get(Record,'real-event').data))['date']=='2027-03-15'
+
+def test_event_package_has_names_but_no_identity_or_bank(env):
+ app,ids,login,_=env;c,h=login('director');c.post('/api/events',json={'name':'Trip'},headers=h);eid=c.get('/api/events').json['events'][0]['id']
+ with app.extensions['db_sessions']() as db:
+  cipher=app.extensions['cipher'];e=db.get(Record,eid);data=json.loads(cipher.decrypt(e.data));data['called']=[ids['runner']];e.data=cipher.encrypt(json.dumps(data).encode());u=db.get(User,ids['runner']);u.profile=cipher.encrypt(json.dumps({'iban':'SENSITIVE_IBAN','dni':'SENSITIVE_DNI'}).encode());db.commit()
+ from openpyxl import load_workbook
+ r=c.get('/api/events/'+eid+'/package');assert r.status_code==200
+ wb=load_workbook(io.BytesIO(r.data));assert set(wb.sheetnames)=={'Convocatoria','Listado hotel','Planning'}
+ rendered=str([list(sheet.values) for sheet in wb]);assert 'SENSITIVE_IBAN' not in rendered and 'SENSITIVE_DNI' not in rendered
+ runner,_=login('runner');assert runner.get('/api/events/'+eid+'/package').status_code==403

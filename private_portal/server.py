@@ -22,7 +22,7 @@ class User(Base):
     profile=Column(LargeBinary,nullable=False)
 class LoginSession(Base):
     __tablename__='sessions'
-    id=Column(String,primary_key=True); user_id=Column(String,ForeignKey('users.id')); csrf=Column(String); expires=Column(Integer); seen=Column(Integer)
+    id=Column(String,primary_key=True); user_id=Column(String,ForeignKey('users.id')); csrf=Column(String); expires=Column(Integer); seen=Column(Integer); remember=Column(Boolean,default=False,nullable=False)
 class Invite(Base):
     __tablename__='invites'
     token=Column(String,primary_key=True); email=Column(String,nullable=False); name=Column(String,nullable=False); role=Column(String,nullable=False)
@@ -79,7 +79,10 @@ def create_app(test_config=None):
             def unavailable_page():return 'Conexión con la base de datos en configuración.',503
             return app
         engine=engine.execution_options(schema_translate_map={None:'mbb_private'})
-    Base.metadata.create_all(engine); Sessions=sessionmaker(bind=engine,expire_on_commit=False)
+    Base.metadata.create_all(engine)
+    if not dburl.startswith('sqlite'):
+        with engine.begin() as connection:connection.execute(sql_text('ALTER TABLE mbb_private.sessions ADD COLUMN IF NOT EXISTS remember BOOLEAN NOT NULL DEFAULT FALSE'))
+    Sessions=sessionmaker(bind=engine,expire_on_commit=False)
     app.extensions['db_sessions']=Sessions; app.extensions['cipher']=cipher
     dummy_password=generate_password_hash(secrets.token_urlsafe(32),method='scrypt:32768:8:1')
     def seal(v): return cipher.encrypt(json.dumps(v,ensure_ascii=False).encode())
@@ -134,7 +137,7 @@ def create_app(test_config=None):
         token=request.cookies.get('__Host-mbb')
         if token:
             row=g.db.get(LoginSession,digest(token));now=int(time.time())
-            if row and row.expires>now and row.seen>now-1800:
+            if row and row.expires>now and (row.remember or row.seen>now-1800):
                 u=g.db.get(User,row.user_id)
                 if u and u.active:g.user=u;g.login=row;row.seen=now
         if request.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS') and g.login:
@@ -176,9 +179,10 @@ def create_app(test_config=None):
         u=g.db.execute(select(User).where(User.email==email).with_for_update()).scalar_one_or_none()
         valid=check_password_hash(u.password if u else dummy_password,password)
         if not u or not u.active or not valid:audit('login_failed');g.db.commit();abort(401,'Credenciales o código incorrectos')
-        token=secrets.token_urlsafe(40);now=int(time.time());g.db.add(LoginSession(id=digest(token),user_id=u.id,csrf=secrets.token_urlsafe(32),expires=now+8*3600,seen=now))
+        remember=d.get('remember') in (True,'on');lifetime=30*86400 if remember else 8*3600
+        token=secrets.token_urlsafe(40);now=int(time.time());g.db.add(LoginSession(id=digest(token),user_id=u.id,csrf=secrets.token_urlsafe(32),expires=now+lifetime,seen=now,remember=remember))
         g.user=u;audit('login',u.id);response=jsonify(ok=True)
-        response.set_cookie('__Host-mbb',token,secure=True,httponly=True,samesite='Strict',path='/',max_age=8*3600)
+        response.set_cookie('__Host-mbb',token,secure=True,httponly=True,samesite='Strict',path='/',max_age=lifetime if remember else None)
         return response
     @app.post('/api/logout')
     @require()
@@ -235,6 +239,24 @@ def create_app(test_config=None):
         g.db.execute(delete(Invite).where(Invite.email==email,Invite.used==False))
         token=secrets.token_urlsafe(40);i=Invite(token=digest(token),email=email,name=name,role=role,documents=role=='director' and d.get('documents') is True,owner=False,secret=seal(pyotp.random_base32()),expires=int(time.time())+48*3600);g.db.add(i);audit('invite_created',email)
         return jsonify(token=token,expires=i.expires)
+    @app.post('/api/invites/import')
+    @require('director')
+    def bulk_invites():
+        if not g.user.owner:abort(403)
+        rows=body().get('rows')
+        if not isinstance(rows,list) or not 1<=len(rows)<=100:abort(400,'Entre 1 y 100 usuarios por archivo')
+        checked=[];emails=set()
+        for row in rows:
+            if not isinstance(row,dict):abort(400)
+            email=text(row,'email',254).lower();name=text(row,'name',100);role=text(row,'role',30)
+            if not name or '@' not in email or role not in ROLES or email in emails:abort(400,'Revisa nombres, correos duplicados y perfiles')
+            if g.db.scalar(select(User.id).where(User.email==email)):abort(409,'El usuario '+email+' ya existe')
+            emails.add(email);checked.append((email,name,role))
+        output=[]
+        for email,name,role in checked:
+            g.db.execute(delete(Invite).where(Invite.email==email,Invite.used==False))
+            token=secrets.token_urlsafe(40);g.db.add(Invite(token=digest(token),email=email,name=name,role=role,documents=False,owner=False,secret=seal(pyotp.random_base32()),expires=int(time.time())+48*3600));output.append(dict(name=name,email=email,token=token))
+        audit('bulk_invites_created',str(len(output)));return jsonify(invitations=output)
     @app.post('/api/users/<target>/disable')
     @require('director')
     def disable(target):
@@ -253,14 +275,14 @@ def create_app(test_config=None):
     @require('director','runner')
     def profile(target):
         u=runner_target(target);p=unseal(u.profile)
-        if g.user.id!=target and not g.user.documents:p={k:v for k,v in p.items() if k in ('sizes','quantities','coach','club','photoConsent')}
+        if g.user.id!=target and not g.user.documents:p={k:v for k,v in p.items() if k in ('sizes','quantities','coach','club','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar')}
         audit('profile_read',target);return jsonify(profile=p)
     @app.post('/api/profile/<target>')
     @require('director','runner')
     def profile_save(target):
         u=runner_target(target);d=body();p=unseal(u.profile)
-        allowed={'coach','club','sizes','photoConsent'}
-        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder'}
+        allowed={'coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
+        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint'}
         if g.user.role=='director':allowed|={'quantities'}
         for k,v in d.items():
             if k not in allowed:abort(403)
@@ -272,7 +294,17 @@ def create_app(test_config=None):
                 if type(v)!=bool:abort(400)
             elif not isinstance(v,str) or len(v)>250:abort(400)
             p[k]=v
-        u.profile=seal(p);audit('profile_updated',target);return jsonify(ok=True)
+        u.profile=seal(p)
+        if any(k in d for k in ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar','coach','club']):
+            sport={k:p.get(k,'') for k in ['bike','bikeSize','helmet','pedals','coach','club']}
+            for k in ['saddleHeight','saddleToBar']:
+                try:sport[k]=int(p.get(k) or 0)
+                except (ValueError,TypeError):abort(400,'Medida no válida')
+            sport.update(rider=target,notes='')
+            rec=next((x for x in g.db.scalars(select(Record).where(Record.kind=='module:sport')) if unseal(x.data).get('rider')==target),None)
+            if rec:rec.data=seal(sport)
+            else:g.db.add(Record(kind='module:sport',owner_id=target,data=seal(sport)))
+        audit('profile_updated',target);return jsonify(ok=True)
     @app.get('/api/documents/<target>')
     @require('director','runner','communication')
     def documents(target):
@@ -282,15 +314,19 @@ def create_app(test_config=None):
         photos=(g.user.role in ('director','communication') and unseal(u.profile).get('photoConsent')) or g.user.id==target
         return jsonify(documents=[{'id':d.id,'kind':d.kind,'size':d.size,'created':d.created} for d in g.db.scalars(select(Document).where(Document.owner_id==target)) if (d.kind in PRIVATE_TYPES and private) or (d.kind in PHOTO_TYPES and photos)])
     @app.post('/api/documents/<target>')
-    @require('director','runner')
+    @require('director','runner','communication')
     def upload(target):
-        runner_target(target)
-        if not app.testing and os.environ.get('DOCUMENT_UPLOADS_ENABLED')!='true':abort(503,'Carga documental pendiente de activación por Dirección')
-        if g.user.id!=target and not g.user.documents:abort(403)
         kind=request.form.get('kind');f=request.files.get('file')
+        if g.user.role=='communication':
+            target_user=g.db.get(User,target)
+            if not target_user or target_user.role!='runner' or kind not in PHOTO_TYPES or not unseal(target_user.profile).get('photoConsent'):abort(403)
+        else:
+            runner_target(target)
+            if g.user.id!=target and not g.user.documents and kind not in PHOTO_TYPES:abort(403)
+        if kind in PRIVATE_TYPES and not app.testing and os.environ.get('DOCUMENT_UPLOADS_ENABLED')!='true':abort(503,'La carga de DNI, SEPA y documentación privada sigue deshabilitada')
         if kind not in PRIVATE_TYPES|PHOTO_TYPES or not f:abort(400)
-        raw=f.read(8*1024*1024+1)
-        if not raw or len(raw)>8*1024*1024:abort(400,'Máximo 8 MB por archivo')
+        raw=f.read(3*1024*1024+1)
+        if not raw or len(raw)>3*1024*1024:abort(400,'Máximo 3 MB por archivo')
         if kind in PRIVATE_TYPES:
             # Image-only first release: decoded and re-encoded, no executable PDF content.
             if not (raw.startswith(b'\xff\xd8\xff') or raw.startswith(b'\x89PNG\r\n\x1a\n')):abort(400,'Usa una imagen JPG o PNG. PDF aún no está habilitado.')
@@ -407,6 +443,11 @@ def create_app(test_config=None):
     def audits():
         if not g.user.owner:abort(403)
         return jsonify(entries=[{'user':r.user_id,'action':r.action,'target':r.target,'at':r.at} for r in g.db.scalars(select(Audit).order_by(Audit.at.desc()).limit(100))])
+    if not app.testing:
+        from calendar_seed import seed_calendar
+        seed_calendar(Sessions,Record,cipher)
+    from modules import register_modules
+    register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
     return app
 
 if __name__=='__main__':

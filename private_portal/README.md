@@ -1,42 +1,45 @@
-# Miribilla × Ecotisa: portal privado inicial
+# Miribilla × Ecotisa · Portal privado 2027
 
-Primera versión separada de la demo pública. No importa automáticamente datos de localStorage ni datos ficticios.
+Aplicación Flask con PostgreSQL Supabase, desplegada en Vercel. Los datos se conservan cifrados en el esquema `mbb_private`, fuera de los esquemas públicos de la API de Supabase. No se importan expedientes ficticios de la demo.
 
-## Inicio
+## Módulos
 
-- Instalar `pip install -r private_portal/requirements.txt`.
-- Arrancar con `python -m gunicorn --chdir private_portal 'server:create_app()' --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 60`.
-- Configurar `DATABASE_URL` con PostgreSQL; SQLite se usa únicamente en pruebas.
-- Configurar `ENCRYPTION_KEY` con una clave Fernet generada aleatoriamente; conservarla fuera del repositorio, en el gestor de secretos de Render, con copia de recuperación controlada por el titular.
-- `PUBLIC_ORIGIN`: origen HTTPS exacto, sin barra final.
-- Alta inicial mediante `BOOTSTRAP_TOKEN_HASH`, SHA256 de un token aleatorio de 40 bytes o más; `BOOTSTRAP_EXPIRES`, Unix timestamp de caducidad; `ADMIN_EMAIL`, correo del responsable. Nunca guardar el token ni el cifrado en Git.
-- El responsable recibe `https://ORIGEN/#activar=TOKEN` por un canal privado. La primera activación crea la dirección responsable. Enlaces posteriores se generan en Usuarios y no se envían automáticamente.
-- `DOCUMENT_UPLOADS_ENABLED` no permite cargas salvo que tenga el valor `true`. Activar solo tras comprobar permisos en el despliegue real y las copias de recuperación.
+- Inicio de Dirección con resumen y accesos directos.
+- Calendario, disponibilidad, convocatorias publicadas y paquete Excel para licencias y alojamiento.
+- Planning: inscripciones, responsables, hoteles, habitaciones, salidas Bilbao/Zaragoza, recursos y enlaces de horarios/recorridos.
+- Personal técnico, vehículos, material y dos medidas de ajuste.
+- Fichas de corredores, tallas y pedidos de ropa, con dos hojas Excel.
+- Licencias con estado y filtros; resultados y días de actividad.
+- CONTA: ingresos/gastos, partidas de presupuesto, movimientos de banco CSV con revisión/confirmación y deduplicación, conciliación manual, liquidaciones individuales de hotel y manutención.
+- Multas: motivos acordados e historial con estados.
+- Comunicación: biblioteca de fotos autorizadas, cinco plantillas, formatos cuadrado/vertical/Story, diseños colectivos e individuales, borrador/aprobación, publicación disponible en el área del corredor, exportación PNG y menú de compartir del dispositivo.
+- Alta individual o masiva por CSV, invitaciones de un solo uso, recuperación, desactivación/restauración, archivo reversible y auditoría.
 
-## Funciones incluidas
+El calendario previsto aportado por Dirección se recupera una sola vez: doce carreras con fechas y participación pendientes. No sobrescribe carreras existentes ni inventa fechas, DNI, contactos o cuentas de corredores.
 
-Usuarios individuales, contraseña scrypt, TOTP obligatorio, invitaciones con vencimiento y de un solo uso, revocación de sesiones, recuperación mediante Dirección responsable; perfiles con permisos del lado del servidor; calendario compartido, disponibilidad y convocatoria; tallas, cantidades y exportación XLSX con dos hojas; registro de multas; expedientes y fotos cifrados con Fernet; acceso a fotos para Comunicación sujeto a consentimiento; registro de cambios y descargas.
+## Acceso
 
-Los documentos iniciales se limitan a JPG/PNG, decodificados y convertidos a JPEG. No se admite PDF en esta versión. Límite de carga 8 MB por archivo y 400 MB para todos los archivos: revisar almacenamiento antes de ampliar. No se publican rutas de disco ni enlaces de archivo sin autenticación.
+Contraseña mínima de seis caracteres, sin TOTP, según petición expresa del titular. Scrypt, limitación de intentos, cookies HttpOnly/Secure/SameSite y CSRF. El navegador puede guardar la contraseña con permiso del usuario; no se guarda en localStorage. «Recordarme» conserva sesión 30 días; sin marcarlo, sesión de navegador de máximo ocho horas y 30 minutos de inactividad. Desactivar el usuario revoca todas sus sesiones.
 
-## Límites del primer lanzamiento
+La protección de acceso de Vercel se mantiene. El acceso al despliegue puede requerir una cuenta Vercel autorizada; debe resolverse el acceso de visitantes antes del despliegue general al equipo. No desactivar esa capa automáticamente.
 
-- El generador de publicaciones y los módulos de contabilidad/logística de la demo no están migrados. Permanecen en la demo; no presentarlos como integrados.
-- No hay envío de correo configurado: Dirección entrega las invitaciones a cada persona.
-- No hay recuperación de segundo factor por correo. La dirección responsable debe conservar su clave de autenticación; la recuperación excepcional del propietario requiere intervención sobre la infraestructura.
-- No hay todavía programación automática de retención documental ni pantalla de solicitud de derechos. El borrado disponible es manual y deja trazabilidad; las copias mantienen la ventana de recuperación del proveedor.
-- El acceso a DNI/SEPA se concede aparte del rol Dirección. Técnicos y Comunicación nunca reciben datos personales o bancarios.
-- La autorización de imágenes de menores debe registrarse por sus representantes antes de activar el consentimiento.
-- No afirmar certificación legal ni auditoría externa. Las pruebas automatizadas cubren permisos y flujos conocidos; no sustituyen una revisión completa de seguridad ni las obligaciones del responsable del tratamiento.
+## Documentos y límites
 
-## Despliegue previsto
+`DOCUMENT_UPLOADS_ENABLED=false`: DNI, SEPA, licencias escaneadas y autorizaciones no admiten nuevas cargas en producción. Las fotos deportivas sí admiten JPG/PNG, con decodificación y reescritura a JPEG, máximo 3 MB. Comunicación solo puede cargar/descargar fotos de corredores con permiso de imagen, nunca documentos privados. Los archivos usan cifrado y controles por objeto. Límite agregado de archivos: 400 MB en la base.
 
-Render, región Frankfurt; servidor mínimo 0.5c-512mb y Postgres 0.1c-256mb con 1 GB. Una base de pago conserva datos y ofrece recuperación del proveedor. Inspeccionar política de acceso a la base, cifrado, origen, secretos y copias antes de autorizar documentos reales.
+No se afirma que exista auditoría externa ni cumplimiento legal certificado. Con contraseña corta y sin segundo factor, no habilitar documentación sensible sin revisar de nuevo el modelo de protección. Supabase Free no ofrece las mismas copias automáticas y recuperación que el plan de pago de Render previsto inicialmente. No se ha contratado ningún servicio de pago.
 
-**Estado al preparar esta versión:** Render rechaza crear Postgres con HTTP 402 porque falta método de pago. No se ha creado la base ni el servidor privado, no hay usuarios reales activos y la carga documental queda deshabilitada. No usar la demo pública para DNI, SEPA o datos bancarios.
+Los PDF y los justificantes de factura adjuntos no están habilitados. CONTA conserva referencias y datos de las facturas. No hay cargos SEPA ni envío de correos automáticos ni publicación directa a Instagram. La importación bancaria admite CSV; no XLSX/PDF bancario en esta versión. El usuario descarga o comparte las imágenes por su propia acción.
+
+## Configuración
+
+`POSTGRES_URL` o `DATABASE_URL`, `ENCRYPTION_KEY`, `PUBLIC_ORIGIN`, `ADMIN_EMAIL`, `BOOTSTRAP_TOKEN_HASH`, `BOOTSTRAP_EXPIRES`, `DOCUMENT_UPLOADS_ENABLED`. Secretos solo en Vercel; nunca Git. Conservar la clave de cifrado en el gestor de secretos con copia controlada por el titular. Rotarla sin migrar los datos impide recuperar el contenido cifrado.
+
+Vercel: framework Flask, raíz `private_portal`, entrada `app.py`, activos `public/static`. La creación de tablas es aditiva; la única migración de columna añade `sessions.remember` sin cambiar usuarios, contraseñas, sesiones ni registros existentes.
 
 ## Validación
 
 `python -m pytest private_portal/test_security.py -q`
+`npm --prefix qa ci && node qa/check-ui.cjs` (entorno local con jsdom)
 
-Comprueba falta de autenticación, separación de corredores, exclusión de técnicos/Comunicación, documentos por objeto, Dirección limitada, cifrado de archivos, CSRF, revocación de sesiones, repetición TOTP, invitaciones de un solo uso, enlace vencido, invalidación de recuperaciones anteriores, exportación de cantidades, disponibilidad previa a convocatoria, consentimiento de imágenes y limitación de intentos.
+Las pruebas cubren el aislamiento por rol y corredor, los flujos de archivo/restauración, protección documental por objeto, cookies, formularios, importaciones atómicas, consentimiento de fotos, convocatorias y exportación de listados sin DNI ni IBAN. Las comprobaciones DOM cubren navegación y guardado representativo; no sustituyen pruebas en móviles reales ni revisión de seguridad externa.
