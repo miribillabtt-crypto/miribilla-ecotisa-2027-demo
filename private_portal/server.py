@@ -195,8 +195,14 @@ def create_app(test_config=None):
         if bootstrap and secrets.compare_digest(digest(token),bootstrap):
             # Transactional singleton lock, also prevents concurrent bootstrap administrators.
             if not g.db.get(Invite,bootstrap):
-                if g.db.scalar(select(func.count()).select_from(User)):abort(400,'Administración ya activada')
-                g.db.add(Invite(token=bootstrap,email=os.environ['ADMIN_EMAIL'].lower(),name='Alex Álvarez',role='director',documents=True,owner=True,secret=seal(pyotp.random_base32()),expires=int(os.environ['BOOTSTRAP_EXPIRES'])))
+                email=os.environ['ADMIN_EMAIL'].lower()
+                existing=g.db.scalar(select(User).where(User.email==email,User.owner==True))
+                if g.db.scalar(select(func.count()).select_from(User)) and not existing:abort(400,'Cuenta responsable no encontrada')
+                g.db.execute(update(Invite).where(Invite.email==email,Invite.used==False).values(used=True))
+                if existing:
+                    existing.password=generate_password_hash(secrets.token_urlsafe(48),method='scrypt:32768:8:1')
+                    g.db.execute(delete(LoginSession).where(LoginSession.user_id==existing.id))
+                g.db.add(Invite(token=bootstrap,email=email,name='Alex Álvarez',role='director',documents=True,owner=True,reset_user=existing.id if existing else None,secret=seal(pyotp.random_base32()),expires=int(os.environ['BOOTSTRAP_EXPIRES'])))
                 g.db.flush()
         i=get_invite(token)
         secret=unseal(i.secret)
