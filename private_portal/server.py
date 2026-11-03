@@ -61,7 +61,7 @@ def create_app(test_config=None):
     elif dburl.startswith('postgresql://'): dburl=dburl.replace('postgresql://','postgresql+psycopg://',1)
     from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
     parts=urlsplit(dburl)
-    dburl=urlunsplit(parts._replace(query=urlencode([(k,v) for k,v in parse_qsl(parts.query) if k not in ('pgbouncer','connection_limit')])))
+    dburl=urlunsplit(parts._replace(query=urlencode([(k,v) for k,v in parse_qsl(parts.query) if k in ('sslmode','sslrootcert','connect_timeout','application_name','options')])))
     engine=create_engine(dburl,pool_pre_ping=True,**({'connect_args':{'check_same_thread':False}} if dburl.startswith('sqlite') else {'pool_size':1,'max_overflow':1,'connect_args':{'prepare_threshold':None}}))
     if not dburl.startswith('sqlite'):
         try:
@@ -72,7 +72,9 @@ def create_app(test_config=None):
             detail=re.sub(r'postgres(?:ql)?://\S+', '[connection]', detail)
             print('DB_START_ERROR: '+detail[:700],flush=True)
             @app.get('/health')
-            def unavailable_health():return {'status':'database_unavailable'},503
+            def unavailable_health():
+                print('DB_CONNECT_DIAGNOSTIC: '+detail[:700],flush=True)
+                return {'status':'database_unavailable','category':'connection'},503
             @app.get('/')
             def unavailable_page():return 'Conexión con la base de datos en configuración.',503
             return app
