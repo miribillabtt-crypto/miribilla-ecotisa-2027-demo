@@ -71,7 +71,11 @@ def create_app(test_config=None):
             detail=str(getattr(exc,'orig',type(exc).__name__))
             detail=re.sub(r'postgres(?:ql)?://\S+', '[connection]', detail)
             print('DB_START_ERROR: '+detail[:700],flush=True)
-            raise
+            @app.get('/health')
+            def unavailable_health():return {'status':'database_unavailable'},503
+            @app.get('/')
+            def unavailable_page():return 'Conexión con la base de datos en configuración.',503
+            return app
         engine=engine.execution_options(schema_translate_map={None:'mbb_private'})
     Base.metadata.create_all(engine); Sessions=sessionmaker(bind=engine,expire_on_commit=False)
     app.extensions['db_sessions']=Sessions; app.extensions['cipher']=cipher
