@@ -64,7 +64,14 @@ def create_app(test_config=None):
     dburl=urlunsplit(parts._replace(query=urlencode([(k,v) for k,v in parse_qsl(parts.query) if k not in ('pgbouncer','connection_limit')])))
     engine=create_engine(dburl,pool_pre_ping=True,**({'connect_args':{'check_same_thread':False}} if dburl.startswith('sqlite') else {'pool_size':1,'max_overflow':1,'connect_args':{'prepare_threshold':None}}))
     if not dburl.startswith('sqlite'):
-        with engine.begin() as connection:connection.execute(sql_text('CREATE SCHEMA IF NOT EXISTS mbb_private'))
+        try:
+            with engine.begin() as connection:connection.execute(sql_text('CREATE SCHEMA IF NOT EXISTS mbb_private'))
+        except Exception as exc:
+            import re
+            detail=str(getattr(exc,'orig',type(exc).__name__))
+            detail=re.sub(r'postgres(?:ql)?://\S+', '[connection]', detail)
+            print('DB_START_ERROR: '+detail[:700],flush=True)
+            raise
         engine=engine.execution_options(schema_translate_map={None:'mbb_private'})
     Base.metadata.create_all(engine); Sessions=sessionmaker(bind=engine,expire_on_commit=False)
     app.extensions['db_sessions']=Sessions; app.extensions['cipher']=cipher
