@@ -125,12 +125,10 @@ function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');i
  box.querySelector('#takeInvoicePhoto').onclick=()=>camera.click();
  box.querySelector('#pickInvoiceFile').onclick=()=>picker.click();
  let selection=0;
- const chooseOriginal=async e=>{
+ const chooseOriginal=async (file,fromCamera)=>{
   const attempt=++selection;
-  let file=e.target.files[0];
-  e.target.value='';
   if(!file)return;
-  if(e.target===camera&&(file.size>4*1024*1024||!/^image\/(jpeg|png|webp)$/.test(file.type))){
+  if(fromCamera&&(file.size>4*1024*1024||!/^image\/(jpeg|png|webp)$/.test(file.type))){
    try{
     const bitmap=await createImageBitmap(file);
     const canvas=document.createElement('canvas');
@@ -159,7 +157,16 @@ function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');i
   document.getElementById('moduleEditor').hidden=false;
   form.elements.amount.scrollIntoView?.({block:'nearest'});
  };
- camera.onchange=picker.onchange=chooseOriginal;
+ camera.onchange=picker.onchange=e=>{
+  const file=e.target.files[0];
+  e.target.value='';
+  if(file)chooseOriginal(file,e.target===camera);
+ };
+ if(!ctx.fixedEvent&&quickInvoiceFile){
+  const file=quickInvoiceFile;
+  quickInvoiceFile=null;
+  chooseOriginal(file,true);
+ }
  document.getElementById('cancelInvoice').onclick=async()=>{if(current){current.cancelled=true;if(current.worker){try{await current.worker.terminate();}catch{}}document.getElementById('invoiceProgress').textContent='Lectura cancelada.';}};
  document.getElementById('readInvoice').onclick=async()=>{const button=document.getElementById('readInvoice'),cancel=document.getElementById('cancelInvoice'),status=document.getElementById('invoiceProgress'),file=form.invoiceOriginal;if(!file){message('Selecciona una factura o fotografía.');return;}const control={cancelled:false};current=control;button.disabled=true;cancel.hidden=false;message('');try{const result=await InvoiceOCR.read(file,text=>{if(box.isConnected&&!control.cancelled)status.textContent=text;},control);if(control.cancelled||!box.isConnected)return;const fields=InvoiceOCR.parse(result.text);if(!result.text.trim())throw Error('No se ha detectado texto. Prueba una foto más nítida o completa los campos manualmente.');document.getElementById('moduleEditor').hidden=false;
  const mappings=['date','counterparty','reference','taxId','concept','category'];for(const key of mappings){if(fields[key]&&form.elements[key])form.elements[key].value=fields[key];}for(const key of ['amount','baseAmount','taxAmount']){if(Number.isFinite(fields[key])&&fields[key]>=0&&form.elements[key])form.elements[key].value=fields[key].toFixed(2);}form.elements.direction.value='Gasto';form.elements.status.value='Pendiente';const matches=ctx.fixedEvent?[ctx.fixedEvent]:ctx.events.filter(e=>e.date&&fields.date&&fields.date>=e.date&&fields.date<=(e.endDate||e.date)&&e.status!=='Cancelada');if(matches.length===1)form.elements.event.value=matches[0].id;else form.elements.event.value='';form.dataset.ocrReview='true';let review=document.getElementById('invoiceReview');if(!review){review=document.createElement('label');review.id='invoiceReview';review.className='checkline note';review.innerHTML='<input type="checkbox" name="ocrReviewed"> He revisado proveedor, fecha, factura, importes y actividad antes de guardar.';form.querySelector('button[type=submit]').before(review);}form.elements.ocrReviewed.checked=false;
