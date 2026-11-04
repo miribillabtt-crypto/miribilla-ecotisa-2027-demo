@@ -120,10 +120,48 @@ window.InvoiceOCR=(()=>{
  throw Error('Selecciona una foto JPG/PNG/WEBP o un PDF.');}finally{if(worker){try{await worker.terminate();}catch{}}if(pdf){try{await pdf.destroy();}catch{}}control.worker=null;}}
  return {number,date,parse,read,spatialText};
 })();
-function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');if(!form)return;const box=document.createElement('section');box.className='card invoice-ocr';box.innerHTML='<h2>📷 Leer factura o ticket · OCR</h2><p>Fotografía, imagen o PDF. Revisa los datos detectados antes de guardar el gasto.</p><label>Seleccionar factura<input id="invoiceFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf"></label><div class="toolbar"><button type="button" id="readInvoice" class="primary">Leer factura</button><button type="button" id="cancelInvoice" hidden>Cancelar lectura</button></div><p id="invoiceProgress" role="status" aria-live="polite"></p><div id="invoiceDetected"></div><small>La lectura se hace en tu navegador. Al guardar el apunte se subirá el original exacto como justificante privado. Solo Dirección podrá descargarlo. Máximo 4 MB y 8 páginas por lectura.</small>';document.getElementById('moduleEditor').before(box);let current=null;
- document.getElementById('invoiceFile').onchange=e=>{const file=e.target.files[0];if(file&&file.size>4*1024*1024){e.target.value='';form.invoiceOriginal=null;message('El original debe ocupar como máximo 4 MB.');return;}form.invoiceOriginal=file||null;document.getElementById('invoiceProgress').textContent=file?'Original seleccionado: '+file.name+'. Se adjuntará cuando guardes el apunte.':'';};
+function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');if(!form)return;const box=document.createElement('section');box.className='card invoice-ocr';box.innerHTML='<h2>Subir ticket o factura</h2><div class="toolbar"><button type="button" class="primary" id="takeInvoicePhoto">Hacer foto y registrar</button><button type="button" id="pickInvoiceFile">Adjuntar factura o foto</button></div><input id="invoiceCamera" type="file" accept="image/*" capture="environment" hidden><input id="invoiceFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden><div class="toolbar"><button type="button" id="readInvoice" class="primary">Leer factura</button><button type="button" id="cancelInvoice" hidden>Cancelar lectura</button></div><p id="invoiceProgress" role="status" aria-live="polite"></p><div id="invoiceDetected"></div><small>La lectura se hace en tu navegador. Al guardar se adjunta el archivo seleccionado. Las fotos de cámara que superen el límite o usen otro formato se preparan en JPG. Solo Dirección podrá descargarlo. Máximo 4 MB y 8 páginas por lectura.</small>';document.getElementById('moduleEditor').before(box);let current=null;
+ const camera=box.querySelector('#invoiceCamera'),picker=box.querySelector('#invoiceFile');
+ box.querySelector('#takeInvoicePhoto').onclick=()=>camera.click();
+ box.querySelector('#pickInvoiceFile').onclick=()=>picker.click();
+ let selection=0;
+ const chooseOriginal=async e=>{
+  const attempt=++selection;
+  let file=e.target.files[0];
+  e.target.value='';
+  if(!file)return;
+  if(e.target===camera&&(file.size>4*1024*1024||!/^image\/(jpeg|png|webp)$/.test(file.type))){
+   try{
+    const bitmap=await createImageBitmap(file);
+    const canvas=document.createElement('canvas');
+    const scale=Math.min(1,2000/Math.max(bitmap.width,bitmap.height));
+    canvas.width=Math.max(1,Math.round(bitmap.width*scale));
+    canvas.height=Math.max(1,Math.round(bitmap.height*scale));
+    try{
+     canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
+     const jpeg=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.86));
+     if(!jpeg)throw Error('JPEG no disponible');
+     file=new File([jpeg],'foto-ticket.jpg',{type:'image/jpeg'});
+    }finally{bitmap.close();}
+   }catch{
+    if(attempt===selection)message('No se pudo preparar la foto. Adjunta una imagen JPG o PNG de hasta 4 MB.');
+    return;
+   }
+  }
+  if(attempt!==selection||!box.isConnected)return;
+  if(file.size>4*1024*1024){message('El archivo debe ocupar como máximo 4 MB.');return;}
+  if(current)current.cancelled=true;
+  form.invoiceOriginal=file;
+  delete form.dataset.ocrReview;
+  form.querySelector('#invoiceReview')?.remove();
+  box.querySelector('#invoiceDetected').textContent='';
+  box.querySelector('#invoiceProgress').textContent='Archivo seleccionado: '+file.name+'. Indica el importe y guarda, o pulsa Leer factura para probar el OCR.';
+  document.getElementById('moduleEditor').hidden=false;
+  form.elements.amount.scrollIntoView?.({block:'nearest'});
+ };
+ camera.onchange=picker.onchange=chooseOriginal;
  document.getElementById('cancelInvoice').onclick=async()=>{if(current){current.cancelled=true;if(current.worker){try{await current.worker.terminate();}catch{}}document.getElementById('invoiceProgress').textContent='Lectura cancelada.';}};
- document.getElementById('readInvoice').onclick=async()=>{const button=document.getElementById('readInvoice'),cancel=document.getElementById('cancelInvoice'),status=document.getElementById('invoiceProgress'),file=document.getElementById('invoiceFile').files[0];if(!file){message('Selecciona una factura o fotografía.');return;}const control={cancelled:false};current=control;button.disabled=true;cancel.hidden=false;message('');try{const result=await InvoiceOCR.read(file,text=>{if(box.isConnected&&!control.cancelled)status.textContent=text;},control);if(control.cancelled||!box.isConnected)return;const fields=InvoiceOCR.parse(result.text);if(!result.text.trim())throw Error('No se ha detectado texto. Prueba una foto más nítida o completa los campos manualmente.');document.getElementById('moduleEditor').hidden=false;
+ document.getElementById('readInvoice').onclick=async()=>{const button=document.getElementById('readInvoice'),cancel=document.getElementById('cancelInvoice'),status=document.getElementById('invoiceProgress'),file=form.invoiceOriginal;if(!file){message('Selecciona una factura o fotografía.');return;}const control={cancelled:false};current=control;button.disabled=true;cancel.hidden=false;message('');try{const result=await InvoiceOCR.read(file,text=>{if(box.isConnected&&!control.cancelled)status.textContent=text;},control);if(control.cancelled||!box.isConnected)return;const fields=InvoiceOCR.parse(result.text);if(!result.text.trim())throw Error('No se ha detectado texto. Prueba una foto más nítida o completa los campos manualmente.');document.getElementById('moduleEditor').hidden=false;
  const mappings=['date','counterparty','reference','taxId','concept','category'];for(const key of mappings){if(fields[key]&&form.elements[key])form.elements[key].value=fields[key];}for(const key of ['amount','baseAmount','taxAmount']){if(Number.isFinite(fields[key])&&fields[key]>=0&&form.elements[key])form.elements[key].value=fields[key].toFixed(2);}form.elements.direction.value='Gasto';form.elements.status.value='Pendiente';const matches=ctx.fixedEvent?[ctx.fixedEvent]:ctx.events.filter(e=>e.date&&fields.date&&fields.date>=e.date&&fields.date<=(e.endDate||e.date)&&e.status!=='Cancelada');if(matches.length===1)form.elements.event.value=matches[0].id;else form.elements.event.value='';form.dataset.ocrReview='true';let review=document.getElementById('invoiceReview');if(!review){review=document.createElement('label');review.id='invoiceReview';review.className='checkline note';review.innerHTML='<input type="checkbox" name="ocrReviewed"> He revisado proveedor, fecha, factura, importes y actividad antes de guardar.';form.querySelector('button[type=submit]').before(review);}form.elements.ocrReviewed.checked=false;
  status.textContent=result.method+' · '+result.pages+' página(s). '+(result.truncated?'Solo se han leído las primeras 8 páginas. ':'')+'Datos propuestos: revísalos antes de guardar.';const panel=document.getElementById('invoiceDetected');panel.innerHTML='<p class="note">'+(Number.isFinite(fields.amount)?'Total propuesto: '+esc(fields.amount.toFixed(2))+' €':'No se ha detectado un total fiable: introduce el importe manualmente.')+'<br>Base imponible: '+(Number.isFinite(fields.baseAmount)?esc(fields.baseAmount.toFixed(2))+' €':'por revisar')+' · IVA: '+(Number.isFinite(fields.taxAmount)?esc(fields.taxAmount.toFixed(2))+' €':'por revisar')+'<br>'+esc(matches.length===1?(ctx.fixedEvent?'Actividad vinculada: ':'Actividad propuesta: ')+matches[0].name:matches.length>1?'Varias actividades coinciden con la fecha: elige una.':'Sin actividad coincidente: se propone gasto general.')+'</p><details><summary>Ver texto detectado</summary><pre id="invoiceRawText"></pre></details>';document.getElementById('invoiceRawText').textContent=result.text;
  }catch(e){if(box.isConnected&&!control.cancelled)message('No se pudo leer la factura: '+e.message);}finally{button.disabled=false;cancel.hidden=true;if(current===control)current=null;}};}
