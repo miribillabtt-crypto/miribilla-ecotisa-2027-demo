@@ -469,3 +469,25 @@ def test_roster_registration_links_attach_to_existing_runner(env):
  assert client.post('/api/activate/finish',json=activation).status_code==400
  assert client.post('/api/login',json={k:activation[k] for k in ('email','password')}).status_code==200
  assert client.get('/api/me').json['user']['id']==ids['runner']
+
+
+def test_club_contract_pdf_is_private_and_downloads_unchanged(env):
+ _,ids,login,_=env
+ runner,h=login('runner')
+ director,_=login('director')
+ limited,_=login('director_limited')
+ other,_=login('runner2')
+ pdf=io.BytesIO()
+ Image.new('RGB',(24,24),'white').save(pdf,format='PDF')
+ original=pdf.getvalue()
+ path='/api/documents/'+ids['runner']
+ assert runner.post(path,data={'kind':'contrato_club','file':(io.BytesIO(original),'contrato.pdf')},headers=h).status_code==200
+ doc=runner.get(path).json['documents'][0]
+ assert doc['kind']=='contrato_club'
+ url='/api/file/'+doc['id']
+ download=director.get(url)
+ assert download.data==original
+ assert download.mimetype=='application/pdf'
+ assert 'contrato_club.pdf' in download.headers['Content-Disposition']
+ assert limited.get(url).status_code==403
+ assert other.get(url).status_code==403

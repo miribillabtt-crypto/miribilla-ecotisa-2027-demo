@@ -45,7 +45,7 @@ class Attempt(Base):
 ROLES={'director','technician','runner','communication'}
 FINE_TYPES=[('Falta de respeto leve',5),('Falta de respeto moderada',10),('Falta de respeto grave','Expulsión'),('Material en mal estado',5),('Llega 5 minutos tarde',5),('Llega 10 minutos tarde',10),('Llega 15 minutos tarde',15),('No trae ropa adecuada',5),('Otras · 5 €',5),('Otras · 10 €',10)]
 CLOTHES=['Maillot corto','Maillot largo','Culote corto','Culote largo','Gava','Buzo','Pantalón largo','Pantalón corto','Camiseta','Polo','Sudadera','Plumas']
-PRIVATE_TYPES={'dni','sepa','licencia','licencia_reverso','autorizacion'}
+PRIVATE_TYPES={'dni','sepa','licencia','licencia_reverso','autorizacion','contrato_club'}
 PHOTO_TYPES={'portrait','action'}
 
 def create_app(test_config=None):
@@ -377,19 +377,23 @@ def create_app(test_config=None):
         if kind not in PRIVATE_TYPES|PHOTO_TYPES or not f:abort(400)
         raw=f.read(3*1024*1024+1)
         if not raw or len(raw)>3*1024*1024:abort(400,'Máximo 3 MB por archivo')
-        if kind in PRIVATE_TYPES:
-            # Image-only first release: decoded and re-encoded, no executable PDF content.
-            if not (raw.startswith(b'\xff\xd8\xff') or raw.startswith(b'\x89PNG\r\n\x1a\n')):abort(400,'Usa una imagen JPG o PNG. PDF aún no está habilitado.')
-        try:
-            Image.MAX_IMAGE_PIXELS=20_000_000
-            im=Image.open(io.BytesIO(raw));im.load()
-            if im.width*im.height>20_000_000:abort(400)
-            out=io.BytesIO();im.convert('RGB').save(out,format='JPEG',quality=90);raw=out.getvalue()
-        except HTTPException:raise
-        except Exception:abort(400,'Imagen no válida')
+        mime='image/jpeg'
+        if kind=='contrato_club' and raw.startswith(b'%PDF-'):
+            if b'%%EOF' not in raw[-65536:]:abort(400,'El PDF parece incompleto')
+            mime='application/pdf'
+        else:
+            if kind in PRIVATE_TYPES and not raw.startswith((b'\xff\xd8\xff',b'\x89PNG\r\n\x1a\n')):
+                abort(400,'Usa PDF, JPG o PNG para el contrato' if kind=='contrato_club' else 'Usa una imagen JPG o PNG')
+            try:
+                Image.MAX_IMAGE_PIXELS=20_000_000
+                im=Image.open(io.BytesIO(raw));im.load()
+                if im.width*im.height>20_000_000:abort(400)
+                out=io.BytesIO();im.convert('RGB').save(out,format='JPEG',quality=90);raw=out.getvalue()
+            except HTTPException:raise
+            except Exception:abort(400,'Imagen no válida')
         total=g.db.scalar(select(func.coalesce(func.sum(Document.size),0)))
         if total+len(raw)>400*1024*1024:abort(400,'Almacenamiento completo. Contacta con Dirección.')
-        d=Document(owner_id=target,kind=kind,size=len(raw),mime='image/jpeg',created=int(time.time()),content=cipher.encrypt(raw));g.db.add(d);g.db.flush();audit('document_uploaded',d.id);return jsonify(ok=True)
+        d=Document(owner_id=target,kind=kind,size=len(raw),mime=mime,created=int(time.time()),content=cipher.encrypt(raw));g.db.add(d);g.db.flush();audit('document_uploaded',d.id);return jsonify(ok=True)
     @app.get('/api/file/<file_id>')
     @require()
     def file(file_id):
@@ -400,7 +404,7 @@ def create_app(test_config=None):
         if d.kind in PHOTO_TYPES and g.user.role=='communication':allowed=bool(unseal(u.profile).get('photoConsent'))
         if not allowed:abort(403)
         audit('document_downloaded',d.id)
-        return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=True,download_name=d.kind+'.jpg')
+        return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=True,download_name=d.kind+('.pdf' if d.mime=='application/pdf' else '.jpg'))
     @app.post('/api/file/<file_id>/delete')
     @require('director','runner')
     def delete_file(file_id):
