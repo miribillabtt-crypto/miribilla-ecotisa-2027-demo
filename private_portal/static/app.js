@@ -14,7 +14,102 @@ function shell(){let groups=[];if(me.role==='director')groups=[['Inicio',[['home
 async function navigate(next){page=next;message('');const content=shell();try{if(page==='home'){await dashboardPage(content);}else if(featureViews[page]){await featureViews[page](content);}else if(page==='users'){await usersPage(content);addBulkUserImport(content);}else if(page==='calendar'||page==='mine')await calendarPage(content);else if(page==='profile')await profilePage(content,me.id);else if(page==='roster')await rosterPage(content);else if(page==='clothes')await clothesPage(content);else if(page==='fines')await finesPage(content);else if(page==='photos')await photosPage(content);else if(page==='audit'){const d=await api('/audit');content.innerHTML='<h1>Registro de accesos y cambios</h1><div class="card scroll"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Referencia</th></tr></thead><tbody>'+d.entries.map(r=>`<tr><td>${esc(new Date(r.at*1000).toLocaleString('es-ES'))}</td><td>${esc(r.action)}</td><td>${esc(r.user||'Acceso no identificado')}</td><td>${esc(r.target)}</td></tr>`).join('')+'</tbody></table></div>';}}catch(e){message(e.message);}}
 function inviteLink(token){return location.origin+'/#activar='+encodeURIComponent(token);}
 async function usersPage(c){const d=await api('/users');users=d.users;c.innerHTML=`<h1>Usuarios del equipo</h1>${me.owner?`<form method="post" id="invite" class="card"><h2>Crear acceso individual</h2><div class="grid">${field('Nombre y apellidos','name')}${field('Correo de acceso','email','email')}${select('Perfil','role',Object.entries(roles))}</div><label>Permitir consulta de DNI, SEPA y documentos privados (solo Dirección)<input type="checkbox" name="documents"></label><button type="submit" class="primary">Crear invitación</button><div id="inviteResult" aria-live="polite"></div></form>`:''}<div class="card scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Acceso</th><th></th></tr></thead><tbody>${users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${esc(roles[u.role])}${u.documents?' · Documentos':''}</td><td>${u.active?(u.accountReady?'Activo':'Sin acceso'):'Desactivado'}${me.owner&&!u.active?` <button data-restore-user="${u.id}">Restaurar acceso</button>`:''}</td><td>${me.owner&&u.active?`${u.accountReady?`<button data-reset="${u.id}">Restablecer acceso</button> `:''}${!u.owner?`<button data-disable="${u.id}">Desactivar</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`;c.querySelectorAll('[data-restore-user]').forEach(b=>b.onclick=async()=>{try{await api('/users/'+b.dataset.restoreUser+'/restore','POST',{});await navigate('users');}catch(e){message(e.message);}});bindForm('invite',async(f,data)=>{data.documents=f.elements.documents.checked;const result=await api('/invites','POST',data);document.getElementById('inviteResult').innerHTML=`<div class="note"><strong>Invitación creada · caduca en 48 horas</strong><p>Entrega este enlace únicamente a la persona indicada:</p><p class="secret">${esc(inviteLink(result.token))}</p><small>No se ha enviado ningún correo.</small></div>`;});c.querySelectorAll('[data-disable]').forEach(b=>b.onclick=async()=>{if(confirm('¿Desactivar este usuario y cerrar sus sesiones?')){try{await api('/users/'+b.dataset.disable+'/disable','POST',{});await navigate('users');}catch(e){message(e.message);}}});c.querySelectorAll('[data-reset]').forEach(b=>b.onclick=async()=>{if(!confirm('Se cerrarán sus sesiones y se generará un nuevo enlace de activación. ¿Continuar?'))return;try{const r=await api('/users/'+b.dataset.reset+'/reset','POST',{});message('Enlace de recuperación (1 hora): '+inviteLink(r.token));}catch(e){message(e.message);}});}
-async function calendarPage(c){const d=await api('/events');if(me.role==='director')roster=(await api('/roster')).riders;const rows=page==='mine'?d.events.filter(e=>e.myStatus==='Disponible'):d.events;c.innerHTML=`<h1>${page==='mine'?'Mi calendario':'Calendario del equipo'}</h1>${me.role==='director'?`<form method="post" id="event" class="card"><h2>Nueva carrera o actividad</h2><div class="grid">${field('Actividad','name')}${field('Fecha · puede quedar pendiente','date','date')}${field('Lugar','place')}</div><button type="submit" class="primary">Crear actividad</button></form>`:''}${rows.length?rows.map(e=>`<article class="card"><small>${esc(e.date||(e.month&&e.month!=='Sin fecha'?e.month+' · fecha por confirmar':'Fecha por confirmar'))} · ${esc(e.place||'Lugar por confirmar')}</small><h2>${esc(e.name)}</h2>${me.role==='director'?`<button data-event-edit="${e.id}">Editar carrera / horarios</button>`:''}${['runner','technician'].includes(me.role)?`<label>Mi disponibilidad<select data-available="${e.id}">${['Por confirmar','Disponible','No disponible'].map(v=>`<option ${v===e.myStatus?'selected':''}>${v}</option>`).join('')}</select></label><p>${e.called.includes(me.id)?'<span class="pill">Convocado por Dirección</span>':'Sin convocatoria personal'}</p>`:''}${me.role==='director'?`<h3>Disponibilidad de corredores</h3><form method="post" data-call="${e.id}">${roster.map(r=>`<div class="row"><label><span>${esc(r.name)} · ${esc(e.responses[r.id]||'Por confirmar')}</span><input type="checkbox" name="selected" value="${r.id}" ${e.called.includes(r.id)?'checked':''} ${e.responses[r.id]!=='Disponible'?'disabled':''}></label></div>`).join('')}<button type="submit">Guardar convocatoria</button></form>`:''}</article>`).join(''):'<div class="card">No hay actividades en este calendario.</div>'}`;c.querySelectorAll('[data-event-edit]').forEach(b=>b.onclick=()=>editEvent(c,d.events.find(e=>e.id===b.dataset.eventEdit)));bindForm('event',async(_,data)=>{await api('/events','POST',data);await navigate(page);});c.querySelectorAll('[data-available]').forEach(s=>s.onchange=async()=>{try{await api('/events/'+s.dataset.available+'/availability','POST',{status:s.value});await navigate(page);}catch(e){message(e.message);}});c.querySelectorAll('[data-call]').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{await api('/events/'+f.dataset.call+'/call','POST',{users:Array.from(f.querySelectorAll('input:checked:not(:disabled)')).map(i=>i.value)});message('Convocatoria guardada.');}catch(err){message(err.message);}});}
+const calendarMonths=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const calendarDateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+let calendarMonth='';
+
+async function calendarPage(c,selectedId){
+  const director=me.role==='director';
+  const availableRole=['runner','technician'].includes(me.role);
+  const {events}=await api('/events');
+  const rows=page==='mine'&&me.role==='runner'?events.filter(e=>e.myStatus==='Disponible'):events;
+  const monthOf=e=>e.date?.slice(0,7)||(calendarMonths.includes(e.month)?'2027-'+String(calendarMonths.indexOf(e.month)+1).padStart(2,'0'):'');
+  if(!calendarMonth){
+    const now=calendarDateKey(new Date()).slice(0,7);
+    const months=rows.map(monthOf).filter(Boolean).sort();
+    calendarMonth=months.find(month=>month>=now)||months.at(-1)||now;
+  }
+  const event=rows.find(e=>e.id===selectedId);
+  if(event){
+    if(monthOf(event))calendarMonth=monthOf(event);
+    const riders=director?(await api('/roster')).riders:[];
+    const responses=event.responses||{};
+    const called=event.called||[];
+    c.innerHTML=`<button type="button" id="backCalendar">Volver al calendario</button>
+      <article class="card"><h1>${esc(event.name)}</h1>
+      <p>${esc(event.date||(event.month&&event.month!=='Sin fecha'?event.month+' · día por confirmar':'Fecha por confirmar'))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''} · ${esc(event.place||'Lugar por confirmar')}</p>
+      ${event.status?`<p class="pill">${esc(event.status)}</p>`:''}
+      ${event.owner?`<p>Responsable: ${esc(event.owner)}</p>`:''}
+      ${event.notes?`<p class="event-notes">${esc(event.notes)}</p>`:''}
+      ${availableRole?`${select('Mi disponibilidad','status',['Por confirmar','Disponible','No disponible'],event.myStatus)}<p>${called.includes(me.id)&&event.callStatus==='Publicada'?'Convocado por Dirección':'Sin convocatoria personal'}</p>`:''}
+      ${director?`<button type="button" id="editCalendarEvent">Editar prueba o actividad</button>
+      <details class="event-call"><summary>Abrir corredores para convocar · ${called.length} seleccionados</summary>
+      <form method="post" id="calendarCall">${riders.map(r=>`<label class="checkline"><input type="checkbox" name="selected" value="${esc(r.id)}" ${called.includes(r.id)?'checked':''} ${responses[r.id]!=='Disponible'?'disabled':''}>${esc(r.name)} · ${esc(responses[r.id]||'Por confirmar')}</label>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
+      <button type="submit">Guardar convocatoria</button></form></details>`:''}
+      </article>`;
+    document.getElementById('backCalendar').onclick=()=>navigate(page);
+    if(director){
+      document.getElementById('editCalendarEvent').onclick=()=>editEvent(c,event);
+      bindForm('calendarCall',async f=>{
+        const users=[...f.querySelectorAll('input:checked:not(:disabled)')].map(input=>input.value);
+        await api('/events/'+event.id+'/call','POST',{users});
+        f.closest('details').querySelector('summary').textContent='Abrir corredores para convocar · '+users.length+' seleccionados';
+        message('Convocatoria guardada.');
+      });
+    }
+    if(availableRole)c.querySelector('[name=status]').onchange=async e=>{
+      try{
+        await api('/events/'+event.id+'/availability','POST',{status:e.target.value});
+        await calendarPage(c,event.id);
+      }catch(err){message(err.message);}
+    };
+    return;
+  }
+
+  const [year,month]=calendarMonth.split('-').map(Number);
+  const first=new Date(year,month-1,1);
+  const days=new Date(year,month,0).getDate();
+  const offset=(first.getDay()+6)%7;
+  const activity=e=>`<button type="button" class="calendar-event" data-calendar-event="${esc(e.id)}">${esc(e.name)}</button>`;
+  const cells=Array.from({length:Math.ceil((offset+days)/7)*7},(_,index)=>{
+    const day=index-offset+1;
+    if(day<1||day>days)return '<div class="calendar-cell calendar-blank"></div>';
+    const key=calendarDateKey(new Date(year,month-1,day));
+    return `<div class="calendar-cell"><span>${day}</span>${rows.filter(e=>e.date&&e.date<=key&&(e.date===key||e.endDate>=key)).map(activity).join('')}</div>`;
+  }).join('');
+  const pending=rows.filter(e=>!e.date&&monthOf(e)===calendarMonth);
+  const unscheduled=rows.filter(e=>!monthOf(e));
+  const title=page==='mine'?(me.role==='technician'?'Mi disponibilidad':'Mi calendario'):'Calendario del equipo';
+  c.innerHTML=`<h1>${title}</h1>
+    <div class="toolbar calendar-controls">
+      <button type="button" data-month-step="-1">Anterior</button>
+      <label>Mes <input id="calendarMonth" type="month" value="${calendarMonth}"></label>
+      <button type="button" data-month-step="1">Siguiente</button>
+    </div>
+    <div class="calendar-scroll"><div class="calendar-grid" aria-label="${calendarMonths[month-1]} ${year}">
+    ${['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(day=>`<strong>${day}</strong>`).join('')}${cells}</div></div>
+    ${pending.length?`<section class="card"><h2>${calendarMonths[month-1]} · día por confirmar</h2>${pending.map(activity).join('')}</section>`:''}
+    ${unscheduled.length?`<section class="card"><h2>Actividades sin fecha</h2>${unscheduled.map(activity).join('')}</section>`:''}
+    ${director?`<details class="card"><summary>Nueva carrera o actividad</summary><form method="post" id="event">
+      <div class="grid">${field('Actividad','name')}${field('Fecha · puede quedar pendiente','date','date')}${field('Lugar','place')}</div>
+      <button type="submit" class="primary">Crear actividad</button></form></details>`:''}`;
+  const redraw=()=>calendarPage(c).catch(err=>message(err.message));
+  c.querySelectorAll('[data-month-step]').forEach(button=>button.onclick=()=>{
+    calendarMonth=calendarDateKey(new Date(year,month-1+Number(button.dataset.monthStep),1)).slice(0,7);
+    redraw();
+  });
+  document.getElementById('calendarMonth').onchange=e=>{
+    if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value))return;
+    calendarMonth=e.target.value;
+    redraw();
+  };
+  c.querySelectorAll('[data-calendar-event]').forEach(button=>button.onclick=()=>calendarPage(c,button.dataset.calendarEvent).catch(err=>message(err.message)));
+  bindForm('event',async(_,data)=>{
+    await api('/events','POST',data);
+    if(data.date)calendarMonth=data.date.slice(0,7);
+    await calendarPage(c);
+  });
+}
 async function rosterPage(c){roster=(await api('/roster')).riders;c.innerHTML='<h1>Corredores</h1><div class="card">'+(roster.map(r=>`<div class="row"><strong>${esc(r.name)}</strong><button data-profile="${r.id}">Abrir ficha</button></div>`).join('')||'Aún no hay corredores registrados.')+'</div>';c.querySelectorAll('[data-profile]').forEach(b=>b.onclick=()=>profilePage(c,b.dataset.profile).catch(e=>message(e.message)));}
 async function profilePage(c,id){const d=await api('/profile/'+id),p=d.profile;const privateAccess=me.id===id||me.documents;const personalFields=[['Nombre','firstName','text'],['Apellidos','surname','text'],['Año de nacimiento','birthYear','text'],['DNI','dni','text'],['Estado del DNI','dniStatus','text'],['Teléfono','phone','tel'],['Dirección','address','text'],['Fecha de nacimiento','birth','date'],['Tutor/a','guardian','text'],['Teléfono tutor/a','guardianPhone','tel'],['Titular de cuenta','bankHolder','text'],['IBAN','iban','text'],['Email tutor/a','guardianEmail','email'],['Segundo tutor/a','guardian2','text'],['Teléfono segundo tutor/a','guardianPhone2','tel'],['Email segundo tutor/a','guardianEmail2','email'],['Población','city','text'],['Código postal','zip','text'],['Provincia','province','text'],['Salida habitual (Bilbao / Zaragoza)','departureDefault','text'],['Punto de recogida','pickupPoint','text']];c.innerHTML=`<h1>${me.id===id?'Mi ficha':esc(roster.find(r=>r.id===id)?.name||'Ficha del corredor')}</h1>${me.id!==id?'<button type="button" id="backToRoster">Volver a Corredores</button>':''}<form method="post" id="profile" class="card"><h2>Datos deportivos y tallas</h2><div class="grid">${field('Club','club','text',p.club)}${field('Preparador','coach','text',p.coach)}${[['bike','Bicicleta'],['bikeSize','Talla bicicleta'],['helmet','Talla casco'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)'],['saddleToBar','Distancia sillín–manillar (mm)']].map(([key,label])=>field(label,key,'text',p[key])).join('')}${clothes.map(item=>select(item,'size:'+item,['','XXS','XS','S','M','L','XL','XXL','XXXL'],p.sizes?.[item]||'')).join('')}</div>${privateAccess?`<h2>Datos personales privados</h2><div class="grid">${personalFields.map(([label,key,type])=>field(label,key,type,p[key])).join('')}</div>`:''}<label>Permitir a Comunicación acceder a mis fotos para las publicaciones del equipo<input type="checkbox" name="photoConsent" ${p.photoConsent?'checked':''}></label><small>En menores, Dirección debe conservar la autorización de sus representantes antes de marcar este permiso.</small><button type="submit" class="primary">Guardar ficha</button></form>${privateAccess?`<form method="post" id="upload" class="card"><h2>Documentos privados y fotos</h2>${select('Tipo de documento','kind',[['dni','DNI'],['sepa','Mandato SEPA'],['licencia','Licencia federativa'],['autorizacion','Autorización de tutores'],['portrait','Foto de medio cuerpo'],['action','Foto en bicicleta']])}<label>Imagen JPG o PNG · máximo 3 MB<input type="file" name="file" accept="image/jpeg,image/png" required></label><small>Fotos JPG/PNG habilitadas. La carga de DNI, SEPA y documentación privada sigue deshabilitada. PDF aún no está habilitado.</small><button type="submit">Subir documento privado</button></form>`:''}<div id="documents" class="card"></div>`;const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('roster');bindForm('profile',async(f,data)=>{const sizes={};Object.entries(data).filter(([k])=>k.startsWith('size:')).forEach(([k,v])=>sizes[k.slice(5)]=v);const output={club:data.club,coach:data.coach,sizes,photoConsent:f.elements.photoConsent.checked};for(const key of ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'])output[key]=data[key]||'';if(privateAccess)for(const [,key] of personalFields)output[key]=data[key];await api('/profile/'+id,'POST',output);message('Ficha guardada.');});bindForm('upload',async f=>{await api('/documents/'+id,'POST',new FormData(f));await listDocuments(id);message('Documento privado guardado.');f.reset();});await listDocuments(id);}
 async function listDocuments(id){const d=await api('/documents/'+id);document.getElementById('documents').innerHTML='<h2>Archivos registrados</h2>'+(d.documents.map(f=>`<div class="row"><span>${esc(f.kind)} · ${Math.round(f.size/1024)} KB</span><div><a href="/api/file/${f.id}">Descargar</a> <button data-delete-file="${f.id}">Eliminar</button></div></div>`).join('')||'No hay documentos registrados.');document.querySelectorAll('[data-delete-file]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Eliminar este documento? Las copias de seguridad conservan su plazo de retención.'))return;try{await api('/file/'+b.dataset.deleteFile+'/delete','POST',{});await listDocuments(id);}catch(e){message(e.message);}});}
