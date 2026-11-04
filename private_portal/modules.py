@@ -15,7 +15,7 @@ SPECS={
  'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',notes='s'),
  'budget':dict(category='s',amount='money',notes='s'),
  'bank':dict(date='date',concept='s',reference='s',amount='money',direction='direction',matched='s'),
- 'charge':dict(event='event',rider='runner',concept='s',amount='money',status='s',notes='s'),
+ 'charge':dict(event='event?',rider='runner',concept='s',amount='money',status='s',notes='s'),
  'post':dict(event='event',type='posttype',riders='runner[]',template='i',format='format',title='s',subtitle='s',status='poststatus'),
  'license':dict(rider='runner',number='s',status='s',expiration='s',notes='s'),
  'sport':dict(rider='runner',bike='s',bikeSize='s',helmet='s',pedals='s',saddleHeight='i',saddleToBar='i',coach='s',club='s',notes='s'),
@@ -54,6 +54,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if kind=='entry':
    part=g.db.get(Record,data['budget']) if data.get('budget') else None
    data['budgetName']=unseal(part.data).get('category','') if part and part.kind in ('module:budget','archived:budget') else ''
+   data['splitRecorded']=bool(g.db.get(Record,'trip-share:'+row.id))
    data['attachments']=[]
    for document in g.db.scalars(select(Document).where(Document.kind=='invoice:'+row.id)):
     meta=g.db.get(Record,'invoice-meta-'+document.id);info=unseal(meta.data) if meta else {}
@@ -212,6 +213,17 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    data=unseal(row.data)
    if event_id and (data.get('event')!=event_id or data.get('direction')!='Gasto'):continue
    if visible(kind,data):records.append(output(row,kind))
+  if kind=='license' and g.user.role=='director':
+   by_rider={item['rider']:item for item in records}
+   for rider in g.db.scalars(select(User).where(User.role=='runner',User.active==True)):
+    item=by_rider.get(rider.id)
+    if item is None:
+     item=dict(rider=rider.id,status='No aportada')
+     records.append(item)
+    if g.user.documents:
+     documents=g.db.scalars(select(Document).where(Document.owner_id==rider.id,Document.kind.in_(['licencia','licencia_reverso'])).order_by(Document.created.desc(),Document.id.desc()))
+     item['photos']={}
+     for document in documents:item['photos'].setdefault(document.kind,document.id)
   if kind=='budget':
    spent={}
    for row in rows('entry'):

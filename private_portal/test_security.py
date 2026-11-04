@@ -403,3 +403,47 @@ def test_expense_budget_assignment_and_totals(env):
  assert director.get(base+'budget').json['records'][0]['spent']==3000
  assert director.post(base+'entry/'+expense,json={**payload,'status':'Anulado'},headers=h).status_code==200
  assert director.get(base+'budget').json['records'][0]['spent']==0
+
+
+def test_shop_charge_once_and_license_sides(env,monkeypatch):
+ _,ids,login,_=env
+ monkeypatch.delenv('RESEND_API_KEY',raising=False)
+ director,h=login('director')
+ runner,rh=login('runner')
+ other,_=login('runner2')
+ assert director.post('/api/shop/settings',json={'director':ids['director'],'prices':{'Maillot corto':3200}},headers=h).status_code==200
+ payload={'token':'12345678-1234-1234-1234-123456789012','amount':6400,'items':[{'name':'Maillot corto','size':'S','quantity':2}]}
+ for _ in range(2):
+  response=runner.post('/api/shop/orders',json=payload,headers=rh)
+  assert response.status_code==200,response.json
+  assert response.json['emailStatus']=='Pendiente'
+ assert len(runner.get('/api/modules/charge').json['records'])==1
+ assert runner.get('/api/modules/charge').json['records'][0]['amount']==6400
+ assert not other.get('/api/shop').json['orders']
+ raw=io.BytesIO()
+ Image.new('RGB',(30,30),'blue').save(raw,format='PNG')
+ for kind in ('licencia','licencia_reverso'):
+  assert runner.post('/api/documents/'+ids['runner'],data={'kind':kind,'file':(io.BytesIO(raw.getvalue()),'license.png')},headers=rh).status_code==200
+ licenses={row['rider']:row for row in director.get('/api/modules/license').json['records']}
+ assert set(licenses[ids['runner']]['photos'])=={'licencia','licencia_reverso'}
+ assert licenses[ids['runner2']]['status']=='No aportada'
+ assert other.get('/api/file/'+licenses[ids['runner']]['photos']['licencia']).status_code==403
+
+
+def test_trip_share_conserves_cents_and_prevents_duplicate_charge(env):
+ _,ids,login,_=env
+ director,h=login('director')
+ assert director.post('/api/events',json={'name':'Viaje'},headers=h).status_code==200
+ event=director.get('/api/events').json['events'][0]['id']
+ path='/api/events/'+event
+ for role in ('runner','runner2'):
+  rider,rh=login(role)
+  assert rider.post(path+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
+ assert director.post(path+'/call',json={'users':[ids['runner'],ids['runner2']]},headers=h).status_code==200
+ assert director.post(path+'/details',json={'callStatus':'Publicada'},headers=h).status_code==200
+ expense=director.post('/api/modules/entry',json={'event':event,'direction':'Gasto','amount':1001},headers=h).json['id']
+ payload={'expenses':[expense]}
+ assert director.post(path+'/split-expenses',json=payload,headers=h).status_code==200
+ assert director.post(path+'/split-expenses',json=payload,headers=h).status_code==409
+ charges=director.get('/api/modules/charge').json['records']
+ assert sorted(row['amount'] for row in charges)==[500,501]

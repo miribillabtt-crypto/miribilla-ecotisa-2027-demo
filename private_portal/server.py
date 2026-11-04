@@ -45,7 +45,7 @@ class Attempt(Base):
 ROLES={'director','technician','runner','communication'}
 FINE_TYPES=[('Falta de respeto leve',5),('Falta de respeto moderada',10),('Falta de respeto grave','Expulsión'),('Material en mal estado',5),('Llega 5 minutos tarde',5),('Llega 10 minutos tarde',10),('Llega 15 minutos tarde',15),('No trae ropa adecuada',5),('Otras · 5 €',5),('Otras · 10 €',10)]
 CLOTHES=['Maillot corto','Maillot largo','Culote corto','Culote largo','Gava','Buzo','Pantalón largo','Pantalón corto','Camiseta','Polo','Sudadera','Plumas']
-PRIVATE_TYPES={'dni','sepa','licencia','autorizacion'}
+PRIVATE_TYPES={'dni','sepa','licencia','licencia_reverso','autorizacion'}
 PHOTO_TYPES={'portrait','action'}
 
 def create_app(test_config=None):
@@ -467,6 +467,8 @@ def create_app(test_config=None):
     if not app.testing:
         from calendar_seed import seed_calendar
         seed_calendar(Sessions,Record,cipher)
+    from settlements import register_settlements
+    register_settlements(app,Record,User,CLOTHES,seal,unseal,audit,require,body)
     from modules import register_modules
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
     from invoices import register_invoices
