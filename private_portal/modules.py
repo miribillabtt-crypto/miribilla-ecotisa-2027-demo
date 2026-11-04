@@ -133,22 +133,59 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    if other_start and start<=other_end and other_start<=end:
     abort(409,'Ya hay un vehículo reservado para '+activity['name']+' en esas fechas')
 
- @app.get('/api/events/<event_id>/hotel')
- @require('director')
- def hotel_export(event_id):
+ def hotel_people(event_id):
   if not g.user.documents:abort(403)
   record=g.db.get(Record,event_id)
   if not record or record.kind!='event':abort(404)
   event=unseal(record.data)
-  if event.get('callStatus')!='Publicada' or not event.get('called'):
+  people=[]
+  for rider_id in dict.fromkeys(event.get('called',[])):
+   rider=g.db.get(User,rider_id)
+   if rider and rider.role=='runner':
+    people.append(dict(id=rider.id,name=rider.name,role='Corredor',dni=unseal(rider.profile).get('dni','')))
+  planning=next((data for row in rows('travel') if (data:=unseal(row.data)).get('event')==event_id),{})
+  for staff_id in dict.fromkeys(planning.get('staff',[])):
+   staff=g.db.get(Record,staff_id)
+   if not staff or staff.kind!='module:staff':continue
+   identity=g.db.get(Record,'hotel-id:'+staff_id)
+   people.append(dict(id=staff.id,name=unseal(staff.data)['name'],role='Técnico',dni=unseal(identity.data).get('dni','') if identity else ''))
+  return event,people
+
+ @app.get('/api/events/<event_id>/hotel/guests')
+ @require('director')
+ def hotel_guests(event_id):
+  _,people=hotel_people(event_id)
+  return jsonify(guests=[dict(id=p['id'],name=p['name'],role=p['role'],hasDni=bool(p['dni'])) for p in people])
+
+ @app.post('/api/events/<event_id>/hotel/staff/<staff_id>')
+ @require('director')
+ def hotel_staff_identity(event_id,staff_id):
+  import re
+  _,people=hotel_people(event_id)
+  if not any(p['role']=='Técnico' and p['id']==staff_id for p in people):abort(404)
+  dni=body().get('dni')
+  if not isinstance(dni,str):abort(400,'Número de documento no válido')
+  dni=dni.strip().upper()
+  if dni and not re.fullmatch(r'[A-Z0-9-]{4,20}',dni):abort(400,'Número de documento no válido')
+  g.db.get(Record,staff_id,with_for_update=True)
+  identity=g.db.get(Record,'hotel-id:'+staff_id)
+  if dni:
+   if identity:identity.data=seal({'dni':dni})
+   else:g.db.add(Record(id='hotel-id:'+staff_id,kind='system:hotel-id',owner_id=staff_id,data=seal({'dni':dni})))
+  elif identity:g.db.delete(identity)
+  audit('hotel_staff_identity_updated',staff_id)
+  return jsonify(ok=True)
+
+ @app.get('/api/events/<event_id>/hotel')
+ @require('director')
+ def hotel_export(event_id):
+  event,people=hotel_people(event_id)
+  if event.get('callStatus')!='Publicada' or not people:
    abort(400,'Publica la convocatoria antes de descargar el listado del hotel')
   wb=Workbook();sheet=wb.active;sheet.title='Huéspedes'
   sheet.append(['Nombre y apellidos','DNI'])
-  for rider_id in dict.fromkeys(event['called']):
-   rider=g.db.get(User,rider_id)
-   if not rider or rider.role!='runner':continue
-   profile=unseal(rider.profile)
-   sheet.append([rider.name,profile.get('dni') or 'Pendiente'])
+  for guest in people:
+   sheet.append([guest['name'],guest['dni'] or 'Pendiente'])
    for cell in sheet[sheet.max_row]:cell.data_type='s'
   sheet.column_dimensions['A'].width=42
   sheet.column_dimensions['B'].width=22

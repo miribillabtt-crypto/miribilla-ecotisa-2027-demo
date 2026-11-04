@@ -26,6 +26,30 @@ let totals='';if(kind==='days'){const total=rows.reduce((sum,r)=>sum+r.days,0);t
 c.innerHTML=`<h1>${moduleLabels[kind]}</h1>${subnav}${totals}<div class="toolbar"><a class="button" href="/api/modules/${kind}/export">Descargar Excel</a>${canEdit?'<button id="openNew">+ Añadir registro</button>':''}</div>${kind==='charge'?'<p>Liquidación individual de hotel y manutención por actividad. Sin cargos bancarios automáticos.</p>':''}${kind==='bank'&&canEdit?'<div class="card"><h2>Importar movimientos CSV</h2><small>Columnas: fecha;concepto;importe (positivo ingreso, negativo gasto);referencia</small><input type="file" id="bankcsv" accept=".csv"><div id="bankpreview"></div></div>':''}<div id="moduleEditor" ${editing?'':'hidden'}>${canEdit?`<form method="post" id="moduleForm" class="card"><h2>${editing?'Editar':'Nuevo registro'}</h2><div class="grid">${spec.map(f=>moduleInput(f,edit,ctx)).join('')}</div><button class="primary" type="submit">Guardar</button> <button type="button" id="cancelEdit">Cancelar</button></form>`:''}</div><div class="toolbar"><label>Buscar<input id="moduleSearch" placeholder="Nombre, carrera, concepto…"></label>${kind==='license'?'<label>Estado<select id="licenseStatus"><option>Todos</option><option>No aportada</option><option>Pendiente de revisión</option><option>Verificada</option><option>Caducada</option></select></label>':''}</div><div id="moduleRows"></div>`;
 function table(){const query=(document.getElementById('moduleSearch').value||'').toLocaleLowerCase('es');const status=document.getElementById('licenseStatus')?.value||'Todos';const filtered=rows.filter(r=>(status==='Todos'||r.status===status)&&spec.map(([key])=>moduleValue(r[key],key,ctx,spec)).join(' ').toLocaleLowerCase('es').includes(query));const columns=spec.slice(0,5);document.getElementById('moduleRows').innerHTML=filtered.length?`<div class="card scroll"><table><thead><tr>${columns.map(x=>'<th>'+esc(x[1])+'</th>').join('')}${kind==='entry'?'<th>Justificante original</th>':''}<th>Detalle</th>${canEdit?'<th>Acciones</th>':''}</tr></thead><tbody>${filtered.map(r=>`<tr>${columns.map(([key])=>'<td>'+esc(moduleValue(r[key],key,ctx,spec))+'</td>').join('')}${kind==='entry'?`<td>${(r.attachments||[]).map(a=>`<a href="/api/invoice-file/${a.id}">${esc(a.name)}</a>`).join('<br>')||'Sin adjuntar'}</td>`:''}<td><details><summary>Ver ficha</summary><dl>${spec.filter(([key])=>r[key]!==undefined).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(moduleValue(r[key],key,ctx,spec))}</dd>`).join('')}</dl></details></td>${canEdit?`<td><button data-edit="${r.id}">Editar</button> <button data-archive="${r.id}">Archivar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="card">Sin registros para mostrar.</div>';c.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>modulePage(c,kind,b.dataset.edit).catch(e=>message(e.message)));c.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Archivar este registro? Se puede restaurar desde Archivados.'))return;try{await api('/modules/'+kind+'/'+b.dataset.archive+'/archive','POST',{});await modulePage(c,kind);}catch(e){message(e.message);}});}
 table();document.getElementById('moduleSearch').oninput=table;if(document.getElementById('licenseStatus'))document.getElementById('licenseStatus').onchange=table;c.querySelectorAll('[data-finance]').forEach(b=>b.onclick=()=>navigate(b.dataset.finance));if(canEdit){document.getElementById('openNew').onclick=()=>{document.getElementById('moduleEditor').hidden=false;};document.getElementById('cancelEdit').onclick=()=>modulePage(c,kind);bindForm('moduleForm',async(f,data)=>{if(f.dataset.ocrReview==='true'&&!f.elements.ocrReviewed?.checked)throw Error('Revisa los datos detectados y marca la confirmación antes de guardar.');const out={};for(const [key,,type] of spec){if(type==='money'){const v=Number(data[key]);if(!Number.isFinite(v)||v<0)throw Error('Importe no válido');out[key]=Math.round(v*100);}else if(type==='integer')out[key]=Number(data[key]);else if(String(type).endsWith('[]'))out[key]=new FormData(f).getAll(key);else out[key]=data[key]||'';}if(kind==='entry'&&f.invoiceOriginal&&(!out.date||!out.counterparty||out.amount<=0))throw Error('Completa la fecha, el proveedor y un importe mayor que cero antes de guardar la factura.');const savedId=editing||f.dataset.invoiceSavedId||'';const saved=await api('/modules/'+kind+(savedId?'/'+savedId:''),'POST',out);if(kind==='entry'&&f.invoiceOriginal){const id=savedId||saved.id;f.dataset.invoiceSavedId=id;const upload=new FormData();upload.append('file',f.invoiceOriginal);try{await api('/invoices/'+id,'POST',upload);}catch(error){throw Error('El apunte ya está guardado, pero no el original: '+error.message+'. Puedes volver a pulsar Guardar para adjuntarlo sin duplicar el gasto.');}}await modulePage(c,kind);message(kind==='entry'&&f.invoiceOriginal?'Apunte y original guardados.':'Registro guardado.');});}if(kind==='entry'&&canEdit)addInvoiceOCR(c,ctx);if(kind==='bank'&&canEdit)document.getElementById('bankcsv').onchange=bankPreview;if(kind==='vehicle')await vehicleAvailability(c,rows,ctx.events);}
+async function refreshHotelGuests(container,eventId){
+  if(!container)return;
+  const path='/events/'+encodeURIComponent(eventId)+'/hotel';
+  const {guests=[]}=await api(path+'/guests');
+  container.innerHTML=`<summary>Huéspedes y DNI · ${guests.length}</summary>
+    <p>Corredores seleccionados y técnicos asignados en el viaje. Para el registro del hotel, cada huésped puede mostrar el documento original.</p>
+    ${guests.map(guest=>`<div class="row"><span>${esc(guest.name)} · ${guest.role} · ${guest.hasDni?'DNI registrado':'DNI pendiente'}</span>
+      ${guest.role==='Técnico'?`<form method="post" data-staff-identity="${esc(guest.id)}"><label>Número de documento<input name="dni" maxlength="20" autocomplete="off" required></label><button type="submit">Guardar número</button>${guest.hasDni?'<button type="button" data-remove-identity>Quitar número</button>':''}</form>`:''}</div>`).join('')||'<p>Selecciona corredores o asigna técnicos en la ficha del viaje.</p>'}`;
+  container.querySelectorAll('[data-staff-identity]').forEach(form=>{
+    const save=async dni=>{
+      try{
+        await api(path+'/staff/'+encodeURIComponent(form.dataset.staffIdentity),'POST',{dni});
+        await refreshHotelGuests(container,eventId);
+        message(dni?'Número guardado.':'Número eliminado.');
+      }catch(err){message(err.message);}
+    };
+    form.onsubmit=async e=>{
+      e.preventDefault();
+      await save(form.elements.dni.value.trim());
+    };
+    const remove=form.querySelector('[data-remove-identity]');
+    if(remove)remove.onclick=()=>save('');
+  });
+}
 async function eventTravelPanel(panel,event){
   const [travels,staff,vehicles]=await Promise.all([
     api('/modules/travel'),api('/modules/staff'),api('/modules/vehicle')
@@ -44,7 +68,8 @@ async function eventTravelPanel(panel,event){
     <form method="post" id="eventTravel">
       <div class="grid">${spec.map(field=>moduleInput(field,travel,ctx)).join('')}</div>
       <button type="submit" class="primary">Guardar ficha del viaje</button>
-    </form>`;
+    </form>${me.documents?'<details class="card" id="hotelGuests"></details>':''}`;
+  const guests=panel.querySelector('#hotelGuests');
   document.getElementById('travelPublish').onclick=async e=>{
     const button=e.currentTarget;
     button.disabled=true;
@@ -64,8 +89,10 @@ async function eventTravelPanel(panel,event){
     for(const [key,,type] of spec)out[key]=String(type).endsWith('[]')?formData.getAll(key):data[key]||'';
     const saved=await api('/modules/travel'+(travel.id?'/'+travel.id:''),'POST',out);
     travel.id=travel.id||saved.id;
+    await refreshHotelGuests(guests,event.id);
     message('Ficha del viaje guardada.');
   });
+  await refreshHotelGuests(guests,event.id);
 }
 
 async function vehicleAvailability(container,vehicles,events){

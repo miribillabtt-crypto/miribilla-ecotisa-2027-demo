@@ -71,6 +71,7 @@ async function calendarPage(c,selectedId){
         const users=[...f.querySelectorAll('input:checked:not(:disabled)')].map(input=>input.value);
         await api('/events/'+event.id+'/call','POST',{users});
         f.closest('details').querySelector('summary').textContent='Abrir corredores para convocar · '+users.length+' seleccionados';
+        await refreshHotelGuests(c.querySelector('#hotelGuests'),event.id);
         message('Convocatoria guardada.');
       });
     }

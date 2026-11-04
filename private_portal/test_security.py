@@ -314,7 +314,13 @@ def test_hotel_export_and_vehicle_reservations(env):
  first_path='/api/events/'+first
  assert director.post(first_path+'/details',json={'endDate':'2027-03-06'},headers=h).status_code==200
  vehicle=director.post('/api/modules/vehicle',json={'name':'Furgoneta'},headers=h).json['id']
- assert director.post('/api/modules/travel',json={'event':first,'vehicles':[vehicle]},headers=h).status_code==200
+ staff=director.post('/api/modules/staff',json={'name':'Mecánico de prueba'},headers=h).json['id']
+ assert director.post('/api/modules/travel',json={'event':first,'vehicles':[vehicle],'staff':[staff]},headers=h).status_code==200
+ assert director.post(first_path+'/hotel/staff/'+staff,json={'dni':'12345678Z'},headers=h).status_code==200
+ assert '12345678Z' not in director.get('/api/modules/staff').get_data(as_text=True)
+ assert limited.get(first_path+'/hotel/guests').status_code==403
+ assert director.get(first_path+'/hotel/guests').json['guests']==[
+  dict(id=staff,name='Mecánico de prueba',role='Técnico',hasDni=True)]
  assert director.post('/api/modules/travel',json={'event':second,'vehicles':[vehicle]},headers=h).status_code==409
  assert director.post('/api/events/'+second+'/details',json={'date':'2027-03-07'},headers=h).status_code==200
  assert director.post('/api/modules/travel',json={'event':second,'vehicles':[vehicle]},headers=h).status_code==200
@@ -326,6 +332,6 @@ def test_hotel_export_and_vehicle_reservations(env):
  assert director.post(first_path+'/details',json={'callStatus':'Publicada'},headers=h).status_code==200
  response=director.get(first_path+'/hotel')
  assert response.status_code==200
- assert list(load_workbook(io.BytesIO(response.data)).active.values)==[('Nombre y apellidos','DNI'),('runner','00000000T')]
+ assert list(load_workbook(io.BytesIO(response.data)).active.values)==[('Nombre y apellidos','DNI'),('runner','00000000T'),('Mecánico de prueba','12345678Z')]
  assert limited.get(first_path+'/hotel').status_code==403
  assert runner.get(first_path+'/hotel').status_code==403
