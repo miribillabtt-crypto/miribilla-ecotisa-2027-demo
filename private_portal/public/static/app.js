@@ -17,27 +17,44 @@ async function usersPage(c){const d=await api('/users');users=d.users;c.innerHTM
 const calendarMonths=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 const calendarDateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
 let calendarMonth='';
+const activityMonth=event=>event.date?.slice(0,7)||(calendarMonths.includes(event.month)?'2027-'+String(calendarMonths.indexOf(event.month)+1).padStart(2,'0'):'');
+const activityDateLabel=event=>event.date||(activityMonth(event)?event.month+' · día por confirmar':'Fecha por confirmar');
+function sortActivities(events){
+  const key=event=>event.date||(activityMonth(event)?activityMonth(event)+'-00':'9999-99-99');
+  return [...events].sort((a,b)=>key(a).localeCompare(key(b))||a.name.localeCompare(b.name,'es')||a.id.localeCompare(b.id));
+}
+function bindActivitySearch(input,container){
+  const normalize=value=>value.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLowerCase().trim();
+  const items=[...container.querySelectorAll('[data-activity-search]')];
+  const empty=container.querySelector('[data-no-activities]');
+  input.oninput=()=>{
+    const query=normalize(input.value);
+    items.forEach(item=>{item.hidden=!normalize(item.dataset.activitySearch).includes(query);});
+    empty.hidden=items.some(item=>!item.hidden);
+  };
+  input.oninput();
+}
 
 async function calendarPage(c,selectedId){
   const director=me.role==='director';
   const availableRole=['runner','technician'].includes(me.role);
   const {events}=await api('/events');
   const rows=page==='mine'&&me.role==='runner'?events.filter(e=>e.myStatus==='Disponible'):events;
-  const monthOf=e=>e.date?.slice(0,7)||(calendarMonths.includes(e.month)?'2027-'+String(calendarMonths.indexOf(e.month)+1).padStart(2,'0'):'');
   if(!calendarMonth){
     const now=calendarDateKey(new Date()).slice(0,7);
-    const months=rows.map(monthOf).filter(Boolean).sort();
+    const months=rows.map(activityMonth).filter(Boolean).sort();
     calendarMonth=months.find(month=>month>=now)||months.at(-1)||now;
   }
   const event=rows.find(e=>e.id===selectedId);
+  if(selectedId&&!event)throw Error('La actividad ya no está disponible. Vuelve a cargar el calendario.');
   if(event){
-    if(monthOf(event))calendarMonth=monthOf(event);
+    if(activityMonth(event))calendarMonth=activityMonth(event);
     const riders=director?(await api('/roster')).riders:[];
     const responses=event.responses||{};
     const called=event.called||[];
     c.innerHTML=`<button type="button" id="backCalendar">Volver al calendario</button>
       <article class="card"><h1>${esc(event.name)}</h1>
-      <p>${esc(event.date||(event.month&&event.month!=='Sin fecha'?event.month+' · día por confirmar':'Fecha por confirmar'))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''} · ${esc(event.place||'Lugar por confirmar')}</p>
+      <p>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''} · ${esc(event.place||'Lugar por confirmar')}</p>
       ${event.status?`<p class="pill">${esc(event.status)}</p>`:''}
       ${event.owner?`<p>Responsable: ${esc(event.owner)}</p>`:''}
       ${event.notes?`<p class="event-notes">${esc(event.notes)}</p>`:''}
@@ -77,10 +94,15 @@ async function calendarPage(c,selectedId){
     const key=calendarDateKey(new Date(year,month-1,day));
     return `<div class="calendar-cell"><span>${day}</span>${rows.filter(e=>e.date&&e.date<=key&&(e.date===key||e.endDate>=key)).map(activity).join('')}</div>`;
   }).join('');
-  const pending=rows.filter(e=>!e.date&&monthOf(e)===calendarMonth);
-  const unscheduled=rows.filter(e=>!monthOf(e));
+  const pending=rows.filter(e=>!e.date&&activityMonth(e)===calendarMonth);
+  const unscheduled=rows.filter(e=>!activityMonth(e));
   const title=page==='mine'?(me.role==='technician'?'Mi disponibilidad':'Mi calendario'):'Calendario del equipo';
   c.innerHTML=`<h1>${title}</h1>
+    <details class="card"><summary>Buscar en todas las actividades · ${rows.length}</summary>
+      <label>Nombre de la prueba o actividad<input id="calendarSearch" type="search" placeholder="Ej. Guadiana"></label>
+      <div id="calendarSearchResults">${sortActivities(rows).map(e=>`<div data-activity-search="${esc(e.name)}">${activity(e)}<small>${esc(activityDateLabel(e))}</small></div>`).join('')}
+      <p data-no-activities hidden>No hay actividades que coincidan.</p></div>
+    </details>
     <div class="toolbar calendar-controls">
       <button type="button" data-month-step="-1">Anterior</button>
       <label>Mes <input id="calendarMonth" type="month" value="${calendarMonth}"></label>
@@ -93,6 +115,7 @@ async function calendarPage(c,selectedId){
     ${director?`<details class="card"><summary>Nueva carrera o actividad</summary><form method="post" id="event">
       <div class="grid">${field('Actividad','name')}${field('Fecha · puede quedar pendiente','date','date')}${field('Lugar','place')}</div>
       <button type="submit" class="primary">Crear actividad</button></form></details>`:''}`;
+  bindActivitySearch(document.getElementById('calendarSearch'),document.getElementById('calendarSearchResults'));
   const redraw=()=>calendarPage(c).catch(err=>message(err.message));
   c.querySelectorAll('[data-month-step]').forEach(button=>button.onclick=()=>{
     calendarMonth=calendarDateKey(new Date(year,month-1+Number(button.dataset.monthStep),1)).slice(0,7);
