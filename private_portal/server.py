@@ -424,11 +424,18 @@ def create_app(test_config=None):
     def export():
         wb=Workbook();ws=wb.active;ws.title='Por corredor';ws.append(['Corredor','Prenda','Talla','Cantidad']);total={}
         def safe(v):return "'"+v if isinstance(v,str) and v.startswith(('=','+','-','@')) else v
-        for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True)):
-            p=unseal(u.profile)
-            for item,qty in p.get('quantities',{}).items():
-                if qty>0:
-                    size=p.get('sizes',{}).get(item,'Sin indicar');ws.append([safe(u.name),item,size,qty]);total[(item,size)]=total.get((item,size),0)+qty
+        for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True).order_by(User.name,User.id)):
+            profile=unseal(u.profile)
+            sizes=profile.get('sizes',{})
+            quantities=profile.get('quantities',{})
+            for item in CLOTHES:
+                size=sizes.get(item)
+                qty=quantities.get(item)
+                if not size and not qty:continue
+                size=size or 'Sin indicar'
+                ws.append([safe(u.name),item,size,qty if qty is not None else 'Pendiente'])
+                if qty:
+                    total[(item,size)]=total.get((item,size),0)+qty
         ws=wb.create_sheet('Resumen proveedor');ws.append(['Prenda','Talla','Cantidad'])
         for (item,size),qty in sorted(total.items()):ws.append([item,size,qty])
         for sheet in wb:

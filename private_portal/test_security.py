@@ -83,11 +83,16 @@ def test_invite_single_use_and_no_role_escalation(env):
  with app.extensions['db_sessions']() as db:
   u=db.scalar(select(User).where(User.email=='new@test.invalid'));assert u.role=='runner' and not u.documents
 
-def test_clothes_export_only_registered_quantities(env):
+def test_clothes_export_lists_pending_sizes_and_sums_registered_quantities(env):
  _,ids,login,_=env;c,h=login('director')
- r=c.post('/api/profile/'+ids['runner'],json={'sizes':{'Maillot corto':'S'},'quantities':{'Maillot corto':2}},headers=h);assert r.status_code==200
+ r=c.post('/api/profile/'+ids['runner'],json={'sizes':{'Maillot corto':'S','Culote corto':'XS'},'quantities':{'Maillot corto':2,'Camiseta':3}},headers=h)
+ assert r.status_code==200
+ r=c.post('/api/profile/'+ids['runner2'],json={'sizes':{'Maillot corto':'S'},'quantities':{'Maillot corto':1}},headers=h)
+ assert r.status_code==200
  from openpyxl import load_workbook
- wb=load_workbook(io.BytesIO(c.get('/api/clothes/export').data));assert list(wb['Resumen proveedor'].values)==[('Prenda','Talla','Cantidad'),('Maillot corto','S',2)]
+ wb=load_workbook(io.BytesIO(c.get('/api/clothes/export').data))
+ assert list(wb['Resumen proveedor'].values)==[('Prenda','Talla','Cantidad'),('Camiseta','Sin indicar',3),('Maillot corto','S',3)]
+ assert ('runner','Culote corto','XS','Pendiente') in list(wb['Por corredor'].values)
 
 def test_call_requires_available_runner(env):
  app,ids,login,_=env;c,h=login('director');assert c.post('/api/events',json={'name':'Carrera','date':'2027-02-01','place':'Bilbao'},headers=h).status_code==200

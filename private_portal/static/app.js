@@ -142,7 +142,59 @@ async function profilePage(c,id){const d=await api('/profile/'+id),p=d.profile;c
   form.reset();await listDocuments(id);message('Foto guardada.');
 });await listDocuments(id);}
 async function listDocuments(id){const d=await api('/documents/'+id);document.getElementById('documents').innerHTML='<h2>Archivos registrados</h2>'+(d.documents.map(f=>`<div class="row"><span>${esc(({dni:'DNI escaneado',licencia:'Licencia federativa escaneada',portrait:'Foto con equipación',action:'Foto en bicicleta'})[f.kind]||f.kind)} · ${Math.round(f.size/1024)} KB</span><div><a href="/api/file/${f.id}">Descargar</a> <button data-delete-file="${f.id}">Eliminar</button></div></div>`).join('')||'No hay documentos registrados.');document.querySelectorAll('[data-delete-file]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Eliminar este documento? Las copias de seguridad conservan su plazo de retención.'))return;try{await api('/file/'+b.dataset.deleteFile+'/delete','POST',{});await listDocuments(id);}catch(e){message(e.message);}});}
-async function clothesPage(c){const d=await api('/clothes');c.innerHTML=`<h1>Ropa · Pedido del equipo</h1><a class="button" href="/api/clothes/export">Descargar pedido · Excel</a><p>Dos hojas: detalle por corredor y total por prendas y tallas.</p><div class="note">Introduce las unidades a pedir. Una talla registrada no equivale a una prenda encargada.</div>`+d.riders.map(r=>`<form method="post" class="card" data-clothing="${r.id}"><h2>${esc(r.name)}</h2><div class="scroll"><table><thead><tr><th>Prenda</th><th>Talla registrada</th><th>Unidades</th></tr></thead><tbody>${clothes.map(item=>`<tr><td>${esc(item)}</td><td>${esc(r.sizes[item]||'Sin indicar')}</td><td><input type="number" name="${esc(item)}" min="0" max="100" step="1" value="${r.quantities[item]||0}" aria-label="Cantidad de ${esc(item)}"></td></tr>`).join('')}</tbody></table></div><button type="submit">Guardar cantidades</button></form>`).join('');c.querySelectorAll('[data-clothing]').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{const quantities=Object.fromEntries(Array.from(new FormData(f),([k,v])=>[k,Number(v)]));await api('/profile/'+f.dataset.clothing,'POST',{quantities});message('Cantidades del pedido guardadas.');}catch(err){message(err.message);}});}
+async function clothesPage(c){
+  const {riders}=await api('/clothes');
+  c.innerHTML=`<h1>Ropa · Pedido del equipo</h1>
+    <button class="primary" type="button" id="clothesExport">Guardar y descargar pedido · Excel</button>
+    <p id="clothesTotal"></p>
+    <div class="note">El detalle incluye las tallas registradas. El resumen del proveedor suma solo las unidades de pedido. Si falta una cantidad, aparecerá como pendiente.</div>`+riders.map(r=>`
+    <form method="post" class="card" data-clothing="${esc(r.id)}">
+      <h2>${esc(r.name)}</h2>
+      <div class="scroll"><table><thead><tr><th>Prenda</th><th>Talla registrada</th><th>Unidades</th></tr></thead>
+      <tbody>${clothes.map(item=>`<tr><td>${esc(item)}</td><td>${esc(r.sizes[item]||'Sin indicar')}</td>
+      <td><input type="number" name="${esc(item)}" min="0" max="100" step="1" value="${r.quantities[item]??''}" aria-label="Cantidad de ${esc(item)}"></td></tr>`).join('')}</tbody></table></div>
+      <button type="submit">Guardar cantidades</button>
+    </form>`).join('');
+  const forms=[...c.querySelectorAll('[data-clothing]')];
+  const download=c.querySelector('#clothesExport');
+  const total=()=>forms.flatMap(f=>[...new FormData(f).values()]).reduce((sum,value)=>sum+Number(value),0);
+  const showTotal=()=>{c.querySelector('#clothesTotal').textContent='Unidades en el pedido: '+total();};
+  showTotal();
+  const snapshot=form=>JSON.stringify(Object.fromEntries(new FormData(form)));
+  const saved=new Map(forms.map(form=>[form,snapshot(form)]));
+  const save=async form=>{
+    const values=snapshot(form);
+    if(values===saved.get(form))return;
+    const quantities=Object.fromEntries(Object.entries(JSON.parse(values))
+      .filter(([,value])=>value!=='').map(([item,value])=>[item,Number(value)]));
+    await api('/profile/'+form.dataset.clothing,'POST',{quantities});
+    saved.set(form,values);
+  };
+  const run=async action=>{
+    if(download.disabled)return;
+    download.disabled=true;
+    try{await action();}catch(err){message(err.message);}
+    finally{download.disabled=false;}
+  };
+  forms.forEach(form=>{
+    form.oninput=showTotal;
+    form.onsubmit=e=>{
+      e.preventDefault();
+      run(async()=>{await save(form);message('Cantidades del pedido guardadas.');});
+    };
+  });
+  download.onclick=()=>run(async()=>{
+    for(const form of forms){
+      if(!form.reportValidity())return;
+      await save(form);
+    }
+    message(total()?'Pedido actualizado.':'El pedido todavía no tiene unidades. El Excel incluye las tallas registradas.');
+    const link=document.createElement('a');
+    link.href='/api/clothes/export';
+    link.download='Pedido_ropa_Miribilla_Ecotisa.xlsx';
+    link.click();
+  });
+}
 async function finesPage(c){const d=await api('/fines');roster=(await api('/roster')).riders;c.innerHTML=`<h1>${me.role==='runner'?'Mis multas':'Multas'}</h1>${me.role==='director'?`<form method="post" id="fine" class="card">${select('Corredor','user',roster.map(r=>[r.id,r.name]))}${select('Motivo e importe','type',fineTypes.map(([reason,amount],i)=>[String(i),reason+' · '+(typeof amount==='number'?amount+' €':amount)]))}<label>Observaciones<textarea name="note" maxlength="300"></textarea></label><small>Las faltas graves se registran para decisión de Dirección; no eliminan automáticamente al corredor.</small><button type="submit">Registrar multa</button></form>`:''}<div class="card scroll"><table><thead><tr><th>Fecha</th><th>Corredor</th><th>Motivo</th><th>Importe o medida</th><th>Estado</th></tr></thead><tbody>${d.fines.map(f=>`<tr><td>${esc(f.date)}</td><td>${esc(roster.find(r=>r.id===f.user)?.name||'Corredor')}</td><td>${esc(f.reason)}</td><td>${typeof f.amount==='number'?f.amount+' €':esc(f.amount)}</td><td>${esc(f.status)}${me.role==='director'?`<select data-fine-status="${f.id}" aria-label="Estado de la multa">${['Pendiente','Pagada','Anulada','Pendiente de decisión','Resuelta'].map(v=>`<option ${v===f.status?'selected':''}>${v}</option>`).join('')}</select>`:''}</td></tr>`).join('')}</tbody></table></div>`;c.querySelectorAll('[data-fine-status]').forEach(el=>el.onchange=async()=>{try{await api('/fines/'+el.dataset.fineStatus+'/status','POST',{status:el.value});message('Estado actualizado.');}catch(e){message(e.message);}});bindForm('fine',async(_,data)=>{data.type=Number(data.type);await api('/fines','POST',data);await navigate('fines');});}
 async function photosPage(c){const d=await api('/media/roster');c.innerHTML='<h1>Fotos autorizadas</h1><div class="note">Medio cuerpo y en bicicleta. Solo se muestran corredores con autorización de imagen registrada.</div>';for(const r of d.riders){const node=document.createElement('div');node.className='card';node.innerHTML='<h2>'+esc(r.name)+'</h2>'+(r.photos.map(f=>`<p>${esc(f.kind==='portrait'?'Medio cuerpo':'En bicicleta')} · <a href="/api/file/${f.id}">Descargar foto</a></p>`).join('')||'<p>Sin fotos registradas.</p>')+(['director','communication'].includes(me.role)?`<form method="post" data-photo-upload="${r.id}">${select('Tipo de foto','kind',[['portrait','Medio cuerpo'],['action','En bicicleta']])}<label>Foto JPG/PNG · máximo 3 MB<input type="file" name="file" accept="image/jpeg,image/png" required></label><button type="submit">Guardar foto</button></form>`:'');c.appendChild(node);}if(!d.riders.length)c.insertAdjacentHTML('beforeend','<div class="card">Sin corredores con autorización registrada todavía.</div>');c.querySelectorAll('[data-photo-upload]').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{await api('/documents/'+f.dataset.photoUpload,'POST',new FormData(f));await photosPage(c);message('Foto guardada en la ficha del corredor.');}catch(err){message(err.message);}});}
 async function init(){try{const fragment=new URLSearchParams(location.hash.slice(1));const token=fragment.get('activar');const data=await api('/me');me=data.user;csrf=data.csrf||'';if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}page='home';await navigate(page);}catch(e){login();message(e.message);}}
