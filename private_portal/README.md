@@ -25,7 +25,7 @@ La protección de acceso de Vercel se mantiene. El acceso al despliegue puede re
 
 ## Documentos y límites
 
-`DOCUMENT_UPLOADS_ENABLED=false`: DNI, SEPA, licencias escaneadas y autorizaciones no admiten nuevas cargas en producción. Las fotos deportivas sí admiten JPG/PNG, con decodificación y reescritura a JPEG, máximo 3 MB. Comunicación solo puede cargar/descargar fotos de corredores con permiso de imagen, nunca documentos privados. Los archivos usan cifrado y controles por objeto. Límite agregado de archivos: 400 MB en la base.
+`DOCUMENT_UPLOADS_ENABLED=false`: SEPA y autorizaciones no admiten nuevas cargas en producción. El DNI, la licencia federativa y las fotos deportivas admiten JPG/PNG, con decodificación y reescritura a JPEG, máximo 3 MB. Comunicación solo puede cargar/descargar fotos de corredores con permiso de imagen, nunca documentos privados. Los archivos usan cifrado y controles por objeto. Límite agregado de archivos: 400 MB en la base.
 
 No se afirma que exista auditoría externa ni cumplimiento legal certificado. Con contraseña corta y sin segundo factor, no habilitar documentación sensible sin revisar de nuevo el modelo de protección. Supabase Free no ofrece las mismas copias automáticas y recuperación que el plan de pago de Render previsto inicialmente. No se ha contratado ningún servicio de pago.
 

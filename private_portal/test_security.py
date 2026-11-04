@@ -335,3 +335,28 @@ def test_hotel_export_and_vehicle_reservations(env):
  assert list(load_workbook(io.BytesIO(response.data)).active.values)==[('Nombre y apellidos','DNI'),('runner','00000000T'),('Mecánico de prueba','12345678Z')]
  assert limited.get(first_path+'/hotel').status_code==403
  assert runner.get(first_path+'/hotel').status_code==403
+
+
+def test_runner_can_upload_identity_and_license_with_other_private_uploads_off(env,monkeypatch):
+ app,ids,login,_=env
+ runner,headers=login('runner')
+ director,_=login('director')
+ limited,_=login('director_limited')
+ other,_=login('runner2')
+ monkeypatch.setenv('PUBLIC_ORIGIN','https://portal.test')
+ monkeypatch.setenv('DOCUMENT_UPLOADS_ENABLED','false')
+ monkeypatch.setitem(app.config,'TESTING',False)
+ path='/api/documents/'+ids['runner']
+ headers['Origin']='https://portal.test'
+ raw=io.BytesIO()
+ Image.new('RGB',(50,50),'blue').save(raw,format='PNG')
+ for kind in ('dni','licencia','sepa'):
+  result=runner.post(path,data={'kind':kind,'file':(io.BytesIO(raw.getvalue()),'scan.png')},headers=headers)
+  assert result.status_code==(503 if kind=='sepa' else 200),result.json
+ docs=runner.get(path).json['documents']
+ assert {doc['kind'] for doc in docs}=={'dni','licencia'}
+ for doc in docs:
+  url='/api/file/'+doc['id']
+  assert director.get(url).status_code==200
+  assert limited.get(url).status_code==403
+  assert other.get(url).status_code==403

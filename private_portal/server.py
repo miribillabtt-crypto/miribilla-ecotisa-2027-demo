@@ -333,7 +333,7 @@ def create_app(test_config=None):
         else:
             runner_target(target)
             if g.user.id!=target and not g.user.documents and kind not in PHOTO_TYPES:abort(403)
-        if kind in PRIVATE_TYPES and not app.testing and os.environ.get('DOCUMENT_UPLOADS_ENABLED')!='true':abort(503,'La carga de DNI, SEPA y documentación privada sigue deshabilitada')
+        if kind in {'sepa','autorizacion'} and not app.testing and os.environ.get('DOCUMENT_UPLOADS_ENABLED')!='true':abort(503,'La carga de SEPA y autorizaciones está deshabilitada')
         if kind not in PRIVATE_TYPES|PHOTO_TYPES or not f:abort(400)
         raw=f.read(3*1024*1024+1)
         if not raw or len(raw)>3*1024*1024:abort(400,'Máximo 3 MB por archivo')
