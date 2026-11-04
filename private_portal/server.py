@@ -193,8 +193,10 @@ def create_app(test_config=None):
     @require()
     def logout():
         g.db.delete(g.login);audit('logout');r=jsonify(ok=True);r.delete_cookie('__Host-mbb',secure=True,httponly=True,samesite='Strict');return r
-    def get_invite(token):
-        invite=g.db.execute(select(Invite).where(Invite.token==digest(token)).with_for_update()).scalar_one_or_none()
+    def get_invite(token,lock=True):
+        query=select(Invite).where(Invite.token==digest(token))
+        if lock:query=query.with_for_update().execution_options(populate_existing=True)
+        invite=g.db.execute(query).scalar_one_or_none()
         if not invite or invite.used or invite.expires<int(time.time()):abort(400,'Enlace caducado o ya utilizado')
         return invite
     @app.post('/api/activate/start')
@@ -215,13 +217,29 @@ def create_app(test_config=None):
                 g.db.flush()
         i=get_invite(token)
         secret=unseal(i.secret)
-        return jsonify(email=i.email,name=i.name,role=i.role)
+        return jsonify(email=i.email,name=i.name,role=i.role,chooseEmail=not i.email and bool(i.reset_user))
     @app.post('/api/activate/finish')
     def activate_finish():
-        d=body();throttle('finish:'+request.remote_addr,20);i=get_invite(text(d,'token',120))
-        password=text(d,'password',256);code=text(d,'code',10)
+        d=body();throttle('finish:'+request.remote_addr,20);token=text(d,'token',120)
+        pending=get_invite(token,lock=False)
+        roster_activation=not pending.email and bool(pending.reset_user)
+        rider=g.db.get(User,pending.reset_user,with_for_update=True) if roster_activation else None
+        i=get_invite(token)
+        password=text(d,'password',256)
         if len(password)<6:abort(400,'La contraseña debe tener al menos 6 caracteres')
-        u=g.db.get(User,i.reset_user) if i.reset_user else None
+        u=rider if roster_activation else g.db.get(User,i.reset_user) if i.reset_user else None
+        if roster_activation:
+            import re
+            if not u or u.role!='runner' or not u.active or u.email or u.password:abort(409,'La ficha ya tiene acceso o está desactivada')
+            email=text(d,'email',254).lower()
+            if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):abort(400,'Introduce un correo válido')
+            if g.db.scalar(select(User.id).where(User.email==email)):abort(409,'Ese correo ya está registrado')
+            u.email=email
+            from sqlalchemy.exc import IntegrityError
+            try:g.db.flush()
+            except IntegrityError:
+                g.db.rollback()
+                abort(409,'Ese correo ya está registrado')
         if i.reset_user and (not u or not u.active):abort(400)
         if u:
             u.password=generate_password_hash(password,method='scrypt:32768:8:1');u.mfa=i.secret;u.last_step=int(time.time())//30
@@ -230,7 +248,29 @@ def create_app(test_config=None):
             if g.db.scalar(select(User.id).where(User.email==i.email)):abort(409,'Usuario existente')
             u=User(email=i.email,name=i.name,role=i.role,password=generate_password_hash(password,method='scrypt:32768:8:1'),mfa=i.secret,last_step=int(time.time())//30,documents=i.documents,owner=i.owner,profile=seal({}))
             g.db.add(u);g.db.flush()
-        g.db.execute(update(Invite).where(Invite.email==i.email,Invite.used==False).values(used=True));i.used=True;audit('account_activated',u.id);return jsonify(ok=True)
+        related=Invite.reset_user==u.id if roster_activation else Invite.email==i.email
+        g.db.execute(update(Invite).where(related,Invite.used==False).values(used=True))
+        i.used=True;audit('account_activated',u.id);return jsonify(ok=True)
+    @app.post('/api/roster/invites')
+    @require('director')
+    def roster_invites():
+        if not g.user.owner:abort(403,'Solo la dirección responsable puede generar accesos')
+        targets=body().get('riders')
+        if not isinstance(targets,list) or not 1<=len(targets)<=100 or any(not isinstance(x,str) for x in targets):
+            abort(400,'Selecciona al menos un corredor')
+        riders=list(g.db.scalars(select(User).where(User.id.in_(set(targets))).order_by(User.id).with_for_update()))
+        if len(riders)!=len(set(targets)) or any(not u.active or u.role!='runner' or u.email or u.password for u in riders):
+            abort(409,'Selecciona solo corredores activos que aún no tengan acceso')
+        expires=int(time.time())+7*86400
+        invitations=[]
+        for rider in riders:
+            g.db.execute(update(Invite).where(Invite.reset_user==rider.id,Invite.email=='',Invite.used==False).values(used=True))
+            token=secrets.token_urlsafe(40)
+            g.db.add(Invite(token=digest(token),email='',name=rider.name,role='runner',reset_user=rider.id,secret=seal(pyotp.random_base32()),expires=expires))
+            invitations.append(dict(name=rider.name,token=token))
+            audit('rider_invited',rider.id)
+        return jsonify(invitations=sorted(invitations,key=lambda item:item['name']),expires=expires)
+
     @app.get('/api/users')
     @require('director')
     def users():return jsonify(users=[{'id':u.id,'name':u.name,'email':u.email,'role':u.role,'active':u.active,'documents':u.documents,'owner':u.owner,'accountReady':bool(u.email and u.password)} for u in g.db.scalars(select(User).order_by(User.name))])

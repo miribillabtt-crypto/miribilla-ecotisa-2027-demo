@@ -447,3 +447,25 @@ def test_trip_share_conserves_cents_and_prevents_duplicate_charge(env):
  assert director.post(path+'/split-expenses',json=payload,headers=h).status_code==409
  charges=director.get('/api/modules/charge').json['records']
  assert sorted(row['amount'] for row in charges)==[500,501]
+
+
+def test_roster_registration_links_attach_to_existing_runner(env):
+ app,ids,login,_=env
+ director,h=login('director')
+ limited,lh=login('director_limited')
+ with app.extensions['db_sessions'].begin() as db:
+  u=db.get(User,ids['runner'])
+  u.email=u.password=u.mfa=None
+ path='/api/roster/invites'
+ payload={'riders':[ids['runner']]}
+ assert limited.post(path,json=payload,headers=lh).status_code==403
+ old=director.post(path,json=payload,headers=h).json['invitations'][0]['token']
+ token=director.post(path,json=payload,headers=h).json['invitations'][0]['token']
+ client=app.test_client()
+ assert client.post('/api/activate/start',json={'token':old}).status_code==400
+ assert client.post('/api/activate/start',json={'token':token}).json['chooseEmail']
+ activation={'token':token,'email':'rider@example.test','password':'contraseña de prueba'}
+ assert client.post('/api/activate/finish',json=activation).status_code==200
+ assert client.post('/api/activate/finish',json=activation).status_code==400
+ assert client.post('/api/login',json={k:activation[k] for k in ('email','password')}).status_code==200
+ assert client.get('/api/me').json['user']['id']==ids['runner']
