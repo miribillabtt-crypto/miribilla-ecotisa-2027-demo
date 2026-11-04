@@ -298,3 +298,34 @@ def test_import_roster_creates_private_individual_profiles(env):
   user=db.get(User,rider['id'])
   assert user.email is user.password is user.mfa is None
   assert b'00000000T' not in user.profile
+
+
+def test_hotel_export_and_vehicle_reservations(env):
+ from openpyxl import load_workbook
+ _,ids,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ limited,_=login('director_limited')
+ def create(name,start):
+  assert director.post('/api/events',json={'name':name,'date':start},headers=h).status_code==200
+  return next(e['id'] for e in director.get('/api/events').json['events'] if e['name']==name)
+ first=create('Primer viaje','2027-03-04')
+ second=create('Segundo viaje','2027-03-06')
+ first_path='/api/events/'+first
+ assert director.post(first_path+'/details',json={'endDate':'2027-03-06'},headers=h).status_code==200
+ vehicle=director.post('/api/modules/vehicle',json={'name':'Furgoneta'},headers=h).json['id']
+ assert director.post('/api/modules/travel',json={'event':first,'vehicles':[vehicle]},headers=h).status_code==200
+ assert director.post('/api/modules/travel',json={'event':second,'vehicles':[vehicle]},headers=h).status_code==409
+ assert director.post('/api/events/'+second+'/details',json={'date':'2027-03-07'},headers=h).status_code==200
+ assert director.post('/api/modules/travel',json={'event':second,'vehicles':[vehicle]},headers=h).status_code==200
+ assert director.post(first_path+'/details',json={'endDate':'2027-03-07'},headers=h).status_code==409
+ assert runner.post('/api/profile/'+ids['runner'],json={'dni':'00000000T','iban':'PRIVATE'},headers=rh).status_code==200
+ assert runner.post(first_path+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
+ assert director.post(first_path+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
+ assert director.get(first_path+'/hotel').status_code==400
+ assert director.post(first_path+'/details',json={'callStatus':'Publicada'},headers=h).status_code==200
+ response=director.get(first_path+'/hotel')
+ assert response.status_code==200
+ assert list(load_workbook(io.BytesIO(response.data)).active.values)==[('Nombre y apellidos','DNI'),('runner','00000000T')]
+ assert limited.get(first_path+'/hotel').status_code==403
+ assert runner.get(first_path+'/hotel').status_code==403

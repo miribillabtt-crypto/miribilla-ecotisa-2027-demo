@@ -109,6 +109,53 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    for rid in out['riders']:
     if not unseal(g.db.get(User,rid).profile).get('photoConsent'):abort(400,'Falta autorización de imágenes de algún corredor')
   return out
+ def lock_travel():
+  if g.db.get_bind().dialect.name=='postgresql':
+   from sqlalchemy import text
+   g.db.execute(text('SELECT pg_advisory_xact_lock(20273001)'))
+
+ def travel_range(event):
+  start=event.get('date','')
+  return start,max(start,event.get('endDate') or start)
+
+ def check_vehicle_reservations(data,event,skip=None):
+  if not data.get('vehicles'):return
+  start,end=travel_range(event)
+  if not start:abort(400,'Indica la fecha de inicio de la actividad antes de reservar vehículos')
+  for row in rows('travel'):
+   if row.id==skip:continue
+   other=unseal(row.data)
+   if not set(data['vehicles']).intersection(other.get('vehicles',[])):continue
+   record=g.db.get(Record,other['event'])
+   if not record or record.kind!='event':continue
+   activity=unseal(record.data)
+   other_start,other_end=travel_range(activity)
+   if other_start and start<=other_end and other_start<=end:
+    abort(409,'Ya hay un vehículo reservado para '+activity['name']+' en esas fechas')
+
+ @app.get('/api/events/<event_id>/hotel')
+ @require('director')
+ def hotel_export(event_id):
+  if not g.user.documents:abort(403)
+  record=g.db.get(Record,event_id)
+  if not record or record.kind!='event':abort(404)
+  event=unseal(record.data)
+  if event.get('callStatus')!='Publicada' or not event.get('called'):
+   abort(400,'Publica la convocatoria antes de descargar el listado del hotel')
+  wb=Workbook();sheet=wb.active;sheet.title='Huéspedes'
+  sheet.append(['Nombre y apellidos','DNI'])
+  for rider_id in dict.fromkeys(event['called']):
+   rider=g.db.get(User,rider_id)
+   if not rider or rider.role!='runner':continue
+   profile=unseal(rider.profile)
+   sheet.append([rider.name,profile.get('dni') or 'Pendiente'])
+   for cell in sheet[sheet.max_row]:cell.data_type='s'
+  sheet.column_dimensions['A'].width=42
+  sheet.column_dimensions['B'].width=22
+  file=io.BytesIO();wb.save(file);file.seek(0)
+  audit('hotel_guest_list_exported',event_id)
+  return send_file(file,as_attachment=True,download_name='Listado_hotel.xlsx',mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
  @app.get('/api/modules/<kind>')
  @require()
  def list_records(kind):
@@ -117,7 +164,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @require()
  def create_record(kind):
   allowed(kind,True);data=validate(kind,body())
-  if kind=='travel' and any(unseal(r.data)['event']==data['event'] for r in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
+  if kind=='travel':
+   lock_travel()
+   if any(unseal(r.data)['event']==data['event'] for r in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
+   check_vehicle_reservations(data,unseal(g.db.get(Record,data['event']).data))
   if kind in ('license','sport') and any(unseal(r.data)['rider']==data['rider'] for r in rows(kind)):abort(409,'Ya hay una ficha; edítala')
   r=Record(kind='module:'+kind,owner_id=g.user.id,data=seal(data));g.db.add(r);g.db.flush();audit('module_created:'+kind,r.id);return jsonify(id=r.id)
  @app.post('/api/modules/<kind>/<record_id>')
@@ -125,7 +175,12 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def edit_record(kind,record_id):
   allowed(kind,True);r=g.db.get(Record,record_id)
   if not r or r.kind!='module:'+kind:abort(404)
-  data=validate(kind,body());r.data=seal(data);audit('module_updated:'+kind,r.id);return jsonify(ok=True)
+  data=validate(kind,body())
+  if kind=='travel':
+   lock_travel()
+   if any(x.id!=r.id and unseal(x.data)['event']==data['event'] for x in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
+   check_vehicle_reservations(data,unseal(g.db.get(Record,data['event']).data),r.id)
+  r.data=seal(data);audit('module_updated:'+kind,r.id);return jsonify(ok=True)
  @app.post('/api/modules/<kind>/<record_id>/archive')
  @require('director')
  def archive_record(kind,record_id):
@@ -157,6 +212,13 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def restore(record_id):
   r=g.db.get(Record,record_id)
   if not r or not r.kind.startswith('archived:'):abort(404)
+  if r.kind=='archived:travel':
+   lock_travel()
+   data=unseal(r.data)
+   if any(unseal(row.data)['event']==data['event'] for row in rows('travel')):abort(409,'Ya hay planning para esta actividad')
+   event=g.db.get(Record,data['event'])
+   if not event or event.kind!='event':abort(400,'Actividad no encontrada')
+   check_vehicle_reservations(data,unseal(event.data))
   r.kind='module:'+r.kind.split(':',1)[1];audit('module_restored',r.id);return jsonify(ok=True)
  @app.get('/api/modules/<kind>/export')
  @require()
@@ -185,9 +247,11 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @app.post('/api/events/<event_id>/details')
  @require('director')
  def event_details(event_id):
-  r=g.db.get(Record,event_id)
+  d=body()
+  if {'date','endDate'}.intersection(d):lock_travel()
+  r=g.db.get(Record,event_id,with_for_update=True)
   if not r or r.kind!='event':abort(404)
-  d=body();out=unseal(r.data)
+  out=unseal(r.data);previous_dates=travel_range(out)
   for k,v in d.items():
    if k not in ('name','date','endDate','place','category','type','status','owner','notes','callStatus') or not isinstance(v,str) or len(v)>2000:abort(400)
    if k in ('date','endDate') and v:
@@ -201,6 +265,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    for rid in out['called']:
     a=g.db.get(Record,__import__('hashlib').sha256((event_id+':'+rid).encode()).hexdigest())
     if not a or unseal(a.data).get('status')!='Disponible':abort(400,'Revisa la disponibilidad de los convocados')
+  if travel_range(out)!=previous_dates:
+   for travel in rows('travel'):
+    data=unseal(travel.data)
+    if data['event']==event_id:check_vehicle_reservations(data,out,travel.id)
   r.data=seal(out);audit('event_updated',r.id);return jsonify(ok=True)
  @app.get('/api/events/<event_id>/package')
  @require('director')

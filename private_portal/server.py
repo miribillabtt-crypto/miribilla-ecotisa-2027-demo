@@ -403,7 +403,7 @@ def create_app(test_config=None):
     @app.post('/api/events/<event_id>/call')
     @require('director')
     def call(event_id):
-        r=g.db.get(Record,event_id)
+        r=g.db.get(Record,event_id,with_for_update=True)
         if not r or r.kind!='event':abort(404)
         ids=body().get('users')
         if not isinstance(ids,list) or len(ids)>100:abort(400)
