@@ -365,3 +365,25 @@ def test_runner_can_upload_identity_and_license_with_other_private_uploads_off(e
   assert director.get(url).status_code==200
   assert limited.get(url).status_code==403
   assert other.get(url).status_code==403
+
+
+def test_event_expenses_use_existing_conta_entries_and_permissions(env):
+ _,_,login,_=env
+ director,headers=login('director')
+ runner,_=login('runner')
+ for name in ('Carrera A','Carrera B'):
+  assert director.post('/api/events',json={'name':name},headers=headers).status_code==200
+ ids={event['name']:event['id'] for event in director.get('/api/events').json['events']}
+ path='/api/modules/entry'
+ def add(event,direction,category):
+  response=director.post(path,json={'event':event,'direction':direction,'category':category,'amount':1250},headers=headers)
+  assert response.status_code==200,response.json
+  return response.json['id']
+ expense=add(ids['Carrera A'],'Gasto','Gasolina')
+ add(ids['Carrera A'],'Ingreso','Otros')
+ add(ids['Carrera B'],'Gasto','Alojamiento')
+ add('','Gasto','Supermercado')
+ scoped=path+'?event='+ids['Carrera A']
+ assert [row['id'] for row in director.get(scoped).json['records']]==[expense]
+ assert len(director.get(path).json['records'])==4
+ assert runner.get(scoped).status_code==403

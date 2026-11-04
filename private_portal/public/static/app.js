@@ -63,7 +63,7 @@ async function calendarPage(c,selectedId){
       <details class="event-call"><summary>Abrir corredores para convocar · ${called.length} seleccionados</summary>
       <form method="post" id="calendarCall">${riders.map(r=>`<label class="checkline"><input type="checkbox" name="selected" value="${esc(r.id)}" ${called.includes(r.id)?'checked':''} ${responses[r.id]!=='Disponible'?'disabled':''}>${esc(r.name)} · ${esc(responses[r.id]||'Por confirmar')}</label>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
       <button type="submit">Guardar selección de corredores</button></form></details>`:''}
-      </article>${director?'<section class="card" id="eventTravelPanel"></section>':''}`;
+      </article>${director?'<section class="card" id="eventExpensePanel"></section><section class="card" id="eventTravelPanel"></section>':''}`;
     document.getElementById('backCalendar').onclick=()=>navigate(page);
     if(director){
       document.getElementById('editCalendarEvent').onclick=()=>editEvent(c,event);
@@ -81,7 +81,10 @@ async function calendarPage(c,selectedId){
         await calendarPage(c,event.id);
       }catch(err){message(err.message);}
     };
-    if(director)await eventTravelPanel(c.querySelector('#eventTravelPanel'),event);
+    if(director)await Promise.all([
+      eventTravelPanel(c.querySelector('#eventTravelPanel'),event),
+      modulePage(c.querySelector('#eventExpensePanel'),'entry',null,event)
+    ]);
     return;
   }
 

@@ -196,7 +196,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @app.get('/api/modules/<kind>')
  @require()
  def list_records(kind):
-  allowed(kind);return jsonify(records=[output(r,kind) for r in rows(kind) if visible(kind,unseal(r.data))])
+  allowed(kind)
+  event_id=request.args.get('event') if kind=='entry' else None
+  records=[]
+  for row in rows(kind):
+   data=unseal(row.data)
+   if event_id and (data.get('event')!=event_id or data.get('direction')!='Gasto'):continue
+   if visible(kind,data):records.append(output(row,kind))
+  return jsonify(records=records)
  @app.post('/api/modules/<kind>')
  @require()
  def create_record(kind):
