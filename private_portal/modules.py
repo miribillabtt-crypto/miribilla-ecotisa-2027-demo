@@ -12,7 +12,7 @@ SPECS={
  'travel':dict(event='event',manager='s',hotel='s',hotelAddress='s',hotelPhone='s',booking='s',departureBilbao='s',departureZaragoza='s',meeting='s',plan='s',staff='staff[]',vehicles='vehicle[]',rooming='s',registrationDeadline='s',registrationStatus='s',registrationReference='s',routeUrl='url',scheduleUrl='url'),
  'result':dict(event='event',rider='runner',place='i',days='i',discipline='s',notes='s'),
  'days':dict(event='event',person='person',days='i',function='s',notes='s'),
- 'entry':dict(date='date',event='event?',direction='direction',category='s',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',notes='s'),
+ 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',notes='s'),
  'budget':dict(category='s',amount='money',notes='s'),
  'bank':dict(date='date',concept='s',reference='s',amount='money',direction='direction',matched='s'),
  'charge':dict(event='event',rider='runner',concept='s',amount='money',status='s',notes='s'),
@@ -52,12 +52,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   data=unseal(row.data)
   if kind=='travel' and g.user.role=='runner':data={k:v for k,v in data.items() if k not in {'rooming','booking','registrationReference','staff','vehicles'}}
   if kind=='entry':
+   part=g.db.get(Record,data['budget']) if data.get('budget') else None
+   data['budgetName']=unseal(part.data).get('category','') if part and part.kind in ('module:budget','archived:budget') else ''
    data['attachments']=[]
    for document in g.db.scalars(select(Document).where(Document.kind=='invoice:'+row.id)):
     meta=g.db.get(Record,'invoice-meta-'+document.id);info=unseal(meta.data) if meta else {}
     data['attachments'].append(dict(id=document.id,name=info.get('filename','factura'),size=document.size))
   return dict(data,id=row.id)
- def validate(kind,d):
+ def validate(kind,d,previous=None):
   spec=SPECS[kind];out={}
   if not isinstance(d,dict) or set(d)-set(spec):abort(400,'Campos no válidos')
   for key,typ in spec.items():
@@ -78,6 +80,12 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    elif typ=='money':
     # All money is integer cents, never accept floats from clients.
     if type(v)!=int or v<0 or v>100000000:abort(400,'Importe no válido')
+   elif typ=='budget?':
+    if not isinstance(v,str):abort(400,'Partida no válida')
+    if v:
+     part=g.db.get(Record,v)
+     if not part or (part.kind!='module:budget' and not(part.kind=='archived:budget' and (previous or {}).get(key)==v)):
+      abort(400,'Selecciona una partida presupuestaria activa')
    elif typ in ('event','event?'):
     if typ=='event?' and not v:out[key]='';continue
     if not isinstance(v,str):abort(400)
@@ -97,6 +105,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
       r=g.db.get(Record,rid)
       if not r or r.kind!='module:'+ref:abort(400,'Recurso no válido')
    out[key]=v
+  if kind=='entry' and out['direction']!='Gasto':out['budget']=''
   if kind in ('staff','vehicle') and not out['name']:abort(400,'Indica el nombre')
   if kind in ('result','days') and out['days']<1:abort(400,'Indica al menos un día')
   if kind=='post':
@@ -203,6 +212,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    data=unseal(row.data)
    if event_id and (data.get('event')!=event_id or data.get('direction')!='Gasto'):continue
    if visible(kind,data):records.append(output(row,kind))
+  if kind=='budget':
+   spent={}
+   for row in rows('entry'):
+    entry=unseal(row.data)
+    part=entry.get('budget')
+    if part and entry.get('direction')=='Gasto' and entry.get('status')!='Anulado':
+     spent[part]=spent.get(part,0)+entry['amount']
+   for item in records:item['spent']=spent.get(item['id'],0)
   return jsonify(records=records)
  @app.post('/api/modules/<kind>')
  @require()
@@ -219,7 +236,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def edit_record(kind,record_id):
   allowed(kind,True);r=g.db.get(Record,record_id)
   if not r or r.kind!='module:'+kind:abort(404)
-  data=validate(kind,body())
+  payload=body()
+  previous=unseal(r.data) if kind=='entry' else None
+  if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
+  data=validate(kind,payload,previous)
   if kind=='travel':
    lock_travel()
    if any(x.id!=r.id and unseal(x.data)['event']==data['event'] for x in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
@@ -273,7 +293,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    if not visible(kind,d):continue
    d=output(r,kind);line=[]
    for k in keys:
-    v=d.get(k,'')
+    v=d.get('budgetName','') if k=='budget' else d.get(k,'')
     if isinstance(v,list):v=', '.join(v)
     if SPECS[kind][k]=='money':v=v/100
     if isinstance(v,str) and v.startswith(('=','+','-','@')):v="'"+v

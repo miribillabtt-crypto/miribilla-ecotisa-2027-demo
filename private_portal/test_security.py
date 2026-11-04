@@ -387,3 +387,19 @@ def test_event_expenses_use_existing_conta_entries_and_permissions(env):
  assert [row['id'] for row in director.get(scoped).json['records']]==[expense]
  assert len(director.get(path).json['records'])==4
  assert runner.get(scoped).status_code==403
+
+
+def test_expense_budget_assignment_and_totals(env):
+ _,_,login,_=env
+ director,h=login('director')
+ base='/api/modules/'
+ part=director.post(base+'budget',json={'category':'Viajes','amount':10000},headers=h).json['id']
+ payload={'direction':'Gasto','budget':part,'amount':2500}
+ expense=director.post(base+'entry',json=payload,headers=h).json['id']
+ assert director.get(base+'entry').json['records'][0]['budgetName']=='Viajes'
+ assert director.get(base+'budget').json['records'][0]['spent']==2500
+ assert director.post(base+'entry',json={**payload,'budget':'unknown'},headers=h).status_code==400
+ assert director.post(base+'entry/'+expense,json={'direction':'Gasto','amount':3000},headers=h).status_code==200
+ assert director.get(base+'budget').json['records'][0]['spent']==3000
+ assert director.post(base+'entry/'+expense,json={**payload,'status':'Anulado'},headers=h).status_code==200
+ assert director.get(base+'budget').json['records'][0]['spent']==0
