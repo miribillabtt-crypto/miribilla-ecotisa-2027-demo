@@ -269,3 +269,32 @@ def test_invoice_pdf_download_and_validation(env):
  assert c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(b'<html>fake</html>'),'factura.pdf')},headers=h).status_code==400
  assert c.post('/api/invoices/'+eid,data={'file':(io.BytesIO(b'x'*(4*1024*1024+1)),'large.jpg')},headers=h).status_code==400
  assert c.post('/api/invoices/unknown',data={'file':(io.BytesIO(pdf),'file.pdf')},headers=h).status_code==404
+
+
+def test_import_roster_creates_private_individual_profiles(env):
+ from roster_import import import_roster
+ app,_,login,_=env
+ sessions=app.extensions['db_sessions']
+ cipher=app.extensions['cipher']
+ payload=json.dumps([
+  dict(firstName='Nombre',surname='De Prueba',birthYear='2009',dni='00000000T'),
+  dict(firstName='Segundo',surname='De Prueba',birthYear='2010'),
+ ])
+ receipt=import_roster(sessions,Record,User,cipher,payload)
+ assert receipt['added']==receipt['total']==2
+ assert import_roster(sessions,Record,User,cipher,payload)==receipt
+ director,_=login('director')
+ roster=director.get('/api/roster').json['riders']
+ riders=[r for r in roster if r['name'].endswith('De Prueba')]
+ assert len(riders)==2
+ rider=next(r for r in riders if r['name']=='Nombre De Prueba')
+ assert set(rider)=={'id','name'}
+ path='/api/profile/'+rider['id']
+ profile=director.get(path).json['profile']
+ assert profile['birthYear']=='2009' and profile['dni']=='00000000T'
+ limited,_=login('director_limited')
+ assert 'dni' not in limited.get(path).json['profile']
+ with sessions() as db:
+  user=db.get(User,rider['id'])
+  assert user.email is user.password is user.mfa is None
+  assert b'00000000T' not in user.profile

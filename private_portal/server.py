@@ -16,8 +16,8 @@ def uid(): return secrets.token_hex(16)
 def digest(v): return hashlib.sha256(v.encode()).hexdigest()
 class User(Base):
     __tablename__='users'
-    id=Column(String,primary_key=True,default=uid); email=Column(String,unique=True,nullable=False); name=Column(String,nullable=False)
-    role=Column(String,nullable=False); password=Column(Text,nullable=False); mfa=Column(LargeBinary,nullable=False); last_step=Column(Integer,default=-1)
+    id=Column(String,primary_key=True,default=uid); email=Column(String,unique=True,nullable=True); name=Column(String,nullable=False)
+    role=Column(String,nullable=False); password=Column(Text,nullable=True); mfa=Column(LargeBinary,nullable=True); last_step=Column(Integer,default=-1)
     active=Column(Boolean,default=True); documents=Column(Boolean,default=False); owner=Column(Boolean,default=False)
     profile=Column(LargeBinary,nullable=False)
 class LoginSession(Base):
@@ -81,7 +81,9 @@ def create_app(test_config=None):
         engine=engine.execution_options(schema_translate_map={None:'mbb_private'})
     Base.metadata.create_all(engine)
     if not dburl.startswith('sqlite'):
-        with engine.begin() as connection:connection.execute(sql_text('ALTER TABLE mbb_private.sessions ADD COLUMN IF NOT EXISTS remember BOOLEAN NOT NULL DEFAULT FALSE'))
+        with engine.begin() as connection:
+            connection.execute(sql_text('ALTER TABLE mbb_private.sessions ADD COLUMN IF NOT EXISTS remember BOOLEAN NOT NULL DEFAULT FALSE'))
+            connection.execute(sql_text('ALTER TABLE mbb_private.users ALTER COLUMN email DROP NOT NULL, ALTER COLUMN password DROP NOT NULL, ALTER COLUMN mfa DROP NOT NULL'))
     Sessions=sessionmaker(bind=engine,expire_on_commit=False)
     app.extensions['db_sessions']=Sessions; app.extensions['cipher']=cipher
     dummy_password=generate_password_hash(secrets.token_urlsafe(32),method='scrypt:32768:8:1')
@@ -165,7 +167,10 @@ def create_app(test_config=None):
         app.logger.error('request failed: %s',type(e).__name__)
         return jsonify(error='No se pudo completar la operación'),500
     @app.get('/health')
-    def health():g.db.execute(select(1));return jsonify(status='ok')
+    def health():
+        g.db.execute(select(1))
+        receipt=app.config.get('ROSTER_IMPORT_RECEIPT')
+        return jsonify(status='ok',rosterImported=receipt['total']) if receipt else jsonify(status='ok')
     @app.get('/')
     def index():return render_template('index.html')
     @app.get('/api/me')
@@ -177,7 +182,7 @@ def create_app(test_config=None):
         d=body();email=text(d,'email',254).lower();password=text(d,'password',256);code=text(d,'code',10)
         throttle('login:'+email);throttle('ip:'+request.remote_addr,40)
         u=g.db.execute(select(User).where(User.email==email).with_for_update()).scalar_one_or_none()
-        valid=check_password_hash(u.password if u else dummy_password,password)
+        valid=check_password_hash(u.password if u and u.password else dummy_password,password)
         if not u or not u.active or not valid:audit('login_failed');g.db.commit();abort(401,'Credenciales o código incorrectos')
         remember=d.get('remember') in (True,'on');lifetime=30*86400 if remember else 8*3600
         token=secrets.token_urlsafe(40);now=int(time.time());g.db.add(LoginSession(id=digest(token),user_id=u.id,csrf=secrets.token_urlsafe(32),expires=now+lifetime,seen=now,remember=remember))
@@ -228,7 +233,7 @@ def create_app(test_config=None):
         g.db.execute(update(Invite).where(Invite.email==i.email,Invite.used==False).values(used=True));i.used=True;audit('account_activated',u.id);return jsonify(ok=True)
     @app.get('/api/users')
     @require('director')
-    def users():return jsonify(users=[{'id':u.id,'name':u.name,'email':u.email,'role':u.role,'active':u.active,'documents':u.documents,'owner':u.owner} for u in g.db.scalars(select(User).order_by(User.name))])
+    def users():return jsonify(users=[{'id':u.id,'name':u.name,'email':u.email,'role':u.role,'active':u.active,'documents':u.documents,'owner':u.owner,'accountReady':bool(u.email and u.password)} for u in g.db.scalars(select(User).order_by(User.name))])
     @app.post('/api/invites')
     @require('director')
     def invite():
@@ -257,6 +262,11 @@ def create_app(test_config=None):
             g.db.execute(delete(Invite).where(Invite.email==email,Invite.used==False))
             token=secrets.token_urlsafe(40);g.db.add(Invite(token=digest(token),email=email,name=name,role=role,documents=False,owner=False,secret=seal(pyotp.random_base32()),expires=int(time.time())+48*3600));output.append(dict(name=name,email=email,token=token))
         audit('bulk_invites_created',str(len(output)));return jsonify(invitations=output)
+    @app.get('/api/roster/import-status')
+    @require('director')
+    def roster_import_status():
+        if not g.user.owner:abort(403)
+        return jsonify(imports=[unseal(r.data) for r in g.db.scalars(select(Record).where(Record.kind=='system:roster-import'))])
     @app.post('/api/users/<target>/disable')
     @require('director')
     def disable(target):
@@ -269,7 +279,7 @@ def create_app(test_config=None):
     def reset(target):
         if not g.user.owner:abort(403)
         u=g.db.get(User,target)
-        if not u or not u.active:abort(404)
+        if not u or not u.active or not u.email or not u.password:abort(404)
         g.db.execute(update(Invite).where(Invite.email==u.email,Invite.used==False).values(used=True));token=secrets.token_urlsafe(40);g.db.add(Invite(token=digest(token),email=u.email,name=u.name,role=u.role,documents=u.documents,reset_user=u.id,secret=seal(pyotp.random_base32()),expires=int(time.time())+3600));g.db.execute(delete(LoginSession).where(LoginSession.user_id==target));audit('reset_created',target);return jsonify(token=token)
     @app.get('/api/profile/<target>')
     @require('director','runner')
@@ -282,7 +292,7 @@ def create_app(test_config=None):
     def profile_save(target):
         u=runner_target(target);d=body();p=unseal(u.profile)
         allowed={'coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
-        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint'}
+        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus'}
         if g.user.role=='director':allowed|={'quantities'}
         for k,v in d.items():
             if k not in allowed:abort(403)
@@ -443,6 +453,10 @@ def create_app(test_config=None):
     def audits():
         if not g.user.owner:abort(403)
         return jsonify(entries=[{'user':r.user_id,'action':r.action,'target':r.target,'at':r.at} for r in g.db.scalars(select(Audit).order_by(Audit.at.desc()).limit(100))])
+    roster_payload=os.environ.get('ROSTER_IMPORT_DATA')
+    if not app.testing and roster_payload and roster_payload!='[]':
+        from roster_import import import_roster
+        app.config['ROSTER_IMPORT_RECEIPT']=import_roster(Sessions,Record,User,cipher,roster_payload)
     if not app.testing:
         from calendar_seed import seed_calendar
         seed_calendar(Sessions,Record,cipher)
