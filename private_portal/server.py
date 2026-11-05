@@ -339,7 +339,7 @@ def create_app(test_config=None):
     def profile_save(target):
         u=runner_target(target);d=body();p=unseal(u.profile)
         allowed={'coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
-        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus'}
+        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus','medicationStatus','medicationDetails','allergiesStatus','allergiesDetails','intolerancesStatus','intolerancesDetails'}
         if g.user.role=='director':allowed|={'quantities'}
         for k,v in d.items():
             if k not in allowed:abort(403)
@@ -347,6 +347,8 @@ def create_app(test_config=None):
                 if not isinstance(v,dict) or any(key not in CLOTHES for key in v):abort(400)
                 if k=='sizes' and any(val not in ['','XXS','XS','S','M','L','XL','XXL','XXXL'] for val in v.values()):abort(400)
                 if k=='quantities' and any(type(val)!=int or val<0 or val>100 for val in v.values()):abort(400)
+            elif k in ('medicationStatus','allergiesStatus','intolerancesStatus'):
+                if v not in ('','Sí','No'):abort(400,'Selecciona Sí o No')
             elif k=='photoConsent':
                 if type(v)!=bool:abort(400)
             elif not isinstance(v,str) or len(v)>250:abort(400)

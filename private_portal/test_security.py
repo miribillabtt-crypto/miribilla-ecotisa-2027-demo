@@ -586,3 +586,19 @@ def test_resource_availability_restricts_assignments(env):
  assert director.post('/api/resource-availability',json={**payload,'status':'Disponible'},headers=h).status_code==200
  assert director.post('/api/modules/travel',json={'event':event,'vehicles':[vehicle]},headers=h).status_code==200
  assert director.post('/api/resource-availability',json=payload,headers=h).status_code==409
+
+
+def test_rider_health_details_are_private(env):
+ _,ids,login,_=env
+ runner,h=login('runner')
+ director,_=login('director')
+ limited,lh=login('director_limited')
+ path='/api/profile/'+ids['runner']
+ data={'medicationStatus':'Sí','medicationDetails':'Ejemplo privado',
+       'allergiesStatus':'No','allergiesDetails':'',
+       'intolerancesStatus':'Sí','intolerancesDetails':'Ejemplo intolerancia'}
+ assert runner.post(path,json=data,headers=h).status_code==200
+ assert all(director.get(path).json['profile'][key]==value for key,value in data.items())
+ assert not set(data).intersection(limited.get(path).json['profile'])
+ assert limited.post(path,json=data,headers=lh).status_code==403
+ assert runner.post(path,json={'medicationStatus':'Otro'},headers=h).status_code==400
