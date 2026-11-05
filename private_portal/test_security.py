@@ -491,3 +491,23 @@ def test_club_contract_pdf_is_private_and_downloads_unchanged(env):
  assert 'contrato_club.pdf' in download.headers['Content-Disposition']
  assert limited.get(url).status_code==403
  assert other.get(url).status_code==403
+
+
+def test_shared_direction_allows_three_concurrent_sessions(env):
+ from direction_access import seed_direction_account
+ app,_,login,_=env
+ seed=generate_password_hash('shared-test-password',method='scrypt:32768:8:1')
+ sessions=app.extensions['db_sessions']
+ cipher=app.extensions['cipher']
+ seed_direction_account(sessions,User,Record,cipher,seed)
+ seed_direction_account(sessions,User,Record,cipher,generate_password_hash('different-password',method='scrypt:32768:8:1'))
+ clients=[app.test_client() for _ in range(3)]
+ for client in clients:
+  assert client.post('/api/login',json={'email':'DIRECCION','password':'shared-test-password'}).status_code==200
+ for client in clients:
+  me=client.get('/api/me').json['user']
+  assert me['role']=='director' and me['documents'] and not me['owner']
+  assert client.get('/api/summary').status_code==200
+ assert app.test_client().post('/api/login',json={'email':'direccion','password':'wrong'}).status_code==401
+ personal,_=login('director')
+ assert personal.get('/api/me').json['user']['owner']

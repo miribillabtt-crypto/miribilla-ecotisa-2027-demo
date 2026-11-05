@@ -504,6 +504,10 @@ def create_app(test_config=None):
     def audits():
         if not g.user.owner:abort(403)
         return jsonify(entries=[{'user':r.user_id,'action':r.action,'target':r.target,'at':r.at} for r in g.db.scalars(select(Audit).order_by(Audit.at.desc()).limit(100))])
+    shared_hash=os.environ.get('SHARED_DIRECTION_PASSWORD_HASH')
+    if not app.testing and shared_hash:
+        from direction_access import seed_direction_account
+        seed_direction_account(Sessions,User,Record,cipher,shared_hash)
     roster_payload=os.environ.get('ROSTER_IMPORT_DATA')
     if not app.testing and roster_payload and roster_payload!='[]':
         from roster_import import import_roster

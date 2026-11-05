@@ -70,7 +70,7 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
         if g.user.role == 'director':
             result['director'] = config['director']
             result['directors'] = [dict(id=u.id, name=u.name) for u in g.db.scalars(
-                select(User).where(User.role == 'director', User.active == True, User.email != None))]
+                select(User).where(User.role == 'director', User.active == True, User.email.contains('@')))]
         return jsonify(result)
 
     @app.post('/api/shop/settings')
@@ -83,7 +83,7 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
         ):
             abort(400, 'Revisa los precios')
         director = g.db.get(User, director_id) if isinstance(director_id, str) and director_id else None
-        if not director or director.role != 'director' or not director.active or not director.email:
+        if not director or director.role != 'director' or not director.active or (not director.email or '@' not in director.email):
             abort(400, 'Elige un director con correo registrado')
         item = g.db.get(Record, 'clothing-shop', with_for_update=True)
         data = seal(dict(prices=prices, director=director.id))
@@ -100,7 +100,7 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
             return order
         director = g.db.get(User, order['director'])
         key, sender = os.getenv('RESEND_API_KEY'), os.getenv('SHOP_FROM_EMAIL')
-        if not key or not sender or not director or not director.active or director.role != 'director' or not director.email:
+        if not key or not sender or not director or not director.active or director.role != 'director' or (not director.email or '@' not in director.email):
             return order
         summary = '\n'.join(f"{line['quantity']} × {line['name']} · talla {line['size']}" for line in order['items'])
         payload = dict(to=[director.email], subject='Pedido de ropa del equipo', text=(
@@ -134,7 +134,7 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
             return jsonify(id=order_id, **unseal(existing.data))
         settings = shop_settings()
         director = g.db.get(User, settings['director']) if settings['director'] else None
-        if not director or not director.active or director.role != 'director' or not director.email:
+        if not director or not director.active or director.role != 'director' or (not director.email or '@' not in director.email):
             abort(400, 'Dirección debe configurar primero la tienda')
         if not isinstance(items, list) or not 1 <= len(items) <= len(clothes):
             abort(400, 'Selecciona al menos una prenda')
