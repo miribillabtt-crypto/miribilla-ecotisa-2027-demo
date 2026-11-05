@@ -169,6 +169,8 @@ def create_app(test_config=None):
     @app.get('/health')
     def health():
         g.db.execute(select(1))
+        rider_receipt=app.config.get('RIDER_ACCOUNT_RECEIPT')
+        if rider_receipt:return jsonify(status='ok',riderAccountsVerified=rider_receipt['verified'],existingAccounts=rider_receipt['existingAccounts'])
         receipt=app.config.get('ROSTER_IMPORT_RECEIPT')
         return jsonify(status='ok',rosterImported=receipt['total']) if receipt else jsonify(status='ok')
     @app.get('/')
@@ -182,6 +184,11 @@ def create_app(test_config=None):
         d=body();email=text(d,'email',254).lower();password=text(d,'password',256);code=text(d,'code',10)
         throttle('login:'+email);throttle('ip:'+request.remote_addr,40)
         u=g.db.execute(select(User).where(User.email==email).with_for_update()).scalar_one_or_none()
+        if not u:
+            from rider_accounts import alias_key
+            alias=g.db.get(Record,alias_key(email))
+            if alias and alias.kind=='system:login-alias':
+                u=g.db.get(User,alias.owner_id,with_for_update=True)
         valid=check_password_hash(u.password if u and u.password else dummy_password,password)
         if not u or not u.active or not valid:audit('login_failed');g.db.commit();abort(401,'Credenciales o código incorrectos')
         remember=d.get('remember') in (True,'on');lifetime=30*86400 if remember else 8*3600
@@ -273,7 +280,7 @@ def create_app(test_config=None):
 
     @app.get('/api/users')
     @require('director')
-    def users():return jsonify(users=[{'id':u.id,'name':u.name,'email':u.email,'role':u.role,'active':u.active,'documents':u.documents,'owner':u.owner,'accountReady':bool(u.email and u.password)} for u in g.db.scalars(select(User).order_by(User.name))])
+    def users():return jsonify(users=[{'id':u.id,'name':u.name,'email':u.email,'role':u.role,'active':u.active,'documents':u.documents,'owner':u.owner,'accountReady':bool(u.password)} for u in g.db.scalars(select(User).order_by(User.name))])
     @app.post('/api/invites')
     @require('director')
     def invite():
@@ -521,6 +528,11 @@ def create_app(test_config=None):
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
     from invoices import register_invoices
     register_invoices(app,Record,Document,cipher,seal,unseal,audit,require)
+    rider_accounts=os.environ.get('RIDER_ACCOUNT_SETUP')
+    if not app.testing and rider_accounts and rider_accounts!='[]':
+        from rider_accounts import provision_rider_accounts,verify_rider_accounts
+        provision_rider_accounts(Sessions,User,Record,Invite,LoginSession,cipher,rider_accounts)
+        app.config['RIDER_ACCOUNT_RECEIPT']=verify_rider_accounts(app,Sessions,User,Record,cipher,rider_accounts,os.environ['PUBLIC_ORIGIN'])
     return app
 
 if __name__=='__main__':

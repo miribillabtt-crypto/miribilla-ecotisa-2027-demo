@@ -511,3 +511,20 @@ def test_shared_direction_allows_three_concurrent_sessions(env):
  assert app.test_client().post('/api/login',json={'email':'direccion','password':'wrong'}).status_code==401
  personal,_=login('director')
  assert personal.get('/api/me').json['user']['owner']
+
+
+def test_named_rider_accounts_use_real_login_and_existing_profile(env):
+ from rider_accounts import provision_rider_accounts,verify_rider_accounts
+ app,ids,login,_=env
+ payload=json.dumps([dict(name='runner',username='test.rider',password='sample-pass')])
+ sessions=app.extensions['db_sessions']
+ cipher=app.extensions['cipher']
+ result=provision_rider_accounts(sessions,User,Record,Invite,__import__('server').LoginSession,cipher,payload)
+ assert result['created']==1 and result['existingAccounts']==1
+ receipt=verify_rider_accounts(app,sessions,User,Record,cipher,payload,'https://portal.test')
+ assert receipt['verified']==1
+ second=provision_rider_accounts(sessions,User,Record,Invite,__import__('server').LoginSession,cipher,payload)
+ assert second['verified']==1
+ client=app.test_client()
+ assert client.post('/api/login',json={'email':'TEST.RIDER','password':'sample-pass'}).status_code==200
+ assert client.get('/api/me').json['user']['id']==ids['runner']
