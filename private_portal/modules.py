@@ -161,11 +161,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    people.append(dict(id=staff.id,name=unseal(staff.data)['name'],role='Técnico',dni=unseal(identity.data).get('dni','') if identity else ''))
   return event,people
 
+ from hotel_documents import register_hotel_documents
+ identity_documents=register_hotel_documents(app,Record,Document,hotel_people,audit,require)
+
  @app.get('/api/events/<event_id>/hotel/guests')
  @require('director')
  def hotel_guests(event_id):
   _,people=hotel_people(event_id)
-  return jsonify(guests=[dict(id=p['id'],name=p['name'],role=p['role'],hasDni=bool(p['dni'])) for p in people])
+  return jsonify(guests=[dict(id=p['id'],name=p['name'],role=p['role'],hasDni=bool(p['dni']),photos=len(identity_documents(p))) for p in people])
 
  @app.post('/api/events/<event_id>/hotel/staff/<staff_id>')
  @require('director')

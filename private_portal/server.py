@@ -45,7 +45,7 @@ class Attempt(Base):
 ROLES={'director','technician','runner','communication'}
 FINE_TYPES=[('Falta de respeto leve',5),('Falta de respeto moderada',10),('Falta de respeto grave','Expulsión'),('Material en mal estado',5),('Llega 5 minutos tarde',5),('Llega 10 minutos tarde',10),('Llega 15 minutos tarde',15),('No trae ropa adecuada',5),('Otras · 5 €',5),('Otras · 10 €',10)]
 CLOTHES=['Maillot corto','Maillot largo','Culote corto','Culote largo','Gava','Buzo','Pantalón largo','Pantalón corto','Camiseta','Polo','Sudadera','Plumas']
-PRIVATE_TYPES={'dni','sepa','licencia','licencia_reverso','autorizacion','contrato_club'}
+PRIVATE_TYPES={'dni','dni_reverso','sepa','licencia','licencia_reverso','autorizacion','contrato_club'}
 PHOTO_TYPES={'portrait','action'}
 
 def create_app(test_config=None):
@@ -382,18 +382,27 @@ def create_app(test_config=None):
             if g.user.id!=target and not g.user.documents and kind not in PHOTO_TYPES:abort(403)
         if kind in {'sepa','autorizacion'} and not app.testing and os.environ.get('DOCUMENT_UPLOADS_ENABLED')!='true':abort(503,'La carga de SEPA y autorizaciones está deshabilitada')
         if kind not in PRIVATE_TYPES|PHOTO_TYPES or not f:abort(400)
-        raw=f.read(3*1024*1024+1)
-        if not raw or len(raw)>3*1024*1024:abort(400,'Máximo 3 MB por archivo')
+        raw=f.read(4*1024*1024+1)
+        if not raw or len(raw)>4*1024*1024:abort(400,'Máximo 4 MB por archivo')
         mime='image/jpeg'
-        if kind=='contrato_club' and raw.startswith(b'%PDF-'):
+        if kind in PRIVATE_TYPES and raw.startswith(b'%PDF-'):
             if b'%%EOF' not in raw[-65536:]:abort(400,'El PDF parece incompleto')
+            from pypdf import PdfReader
+            from pypdf.errors import PdfReadError
+            try:
+                reader=PdfReader(io.BytesIO(raw))
+                if reader.is_encrypted:abort(400,'El PDF tiene contraseña. Sube una copia sin contraseña')
+                if not 1<=len(reader.pages)<=10:abort(400,'Máximo 10 páginas por documento')
+            except (PdfReadError,ValueError,OSError):abort(400,'El PDF no se puede abrir')
             mime='application/pdf'
         else:
             if kind in PRIVATE_TYPES and not raw.startswith((b'\xff\xd8\xff',b'\x89PNG\r\n\x1a\n')):
-                abort(400,'Usa PDF, JPG o PNG para el contrato' if kind=='contrato_club' else 'Usa una imagen JPG o PNG')
+                abort(400,'Usa PDF, JPG o PNG')
             try:
                 Image.MAX_IMAGE_PIXELS=20_000_000
                 im=Image.open(io.BytesIO(raw));im.load()
+                from PIL import ImageOps
+                im=ImageOps.exif_transpose(im)
                 if im.width*im.height>20_000_000:abort(400)
                 out=io.BytesIO();im.convert('RGB').save(out,format='JPEG',quality=90);raw=out.getvalue()
             except HTTPException:raise
@@ -408,6 +417,7 @@ def create_app(test_config=None):
         if not d:abort(404)
         u=g.db.get(User,d.owner_id)
         allowed=g.user.id==d.owner_id or (g.user.role=='director' and (g.user.documents or d.kind in PHOTO_TYPES))
+        if d.kind.startswith('staff-dni:'):allowed=g.user.role=='director' and g.user.documents
         if d.kind in PHOTO_TYPES and g.user.role=='communication':allowed=bool(unseal(u.profile).get('photoConsent'))
         if not allowed:abort(403)
         audit('document_downloaded',d.id)

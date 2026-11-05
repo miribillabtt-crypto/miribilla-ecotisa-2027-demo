@@ -75,8 +75,21 @@ async function refreshHotelGuests(container,eventId){
   const {guests=[]}=await api(path+'/guests');
   container.innerHTML=`<summary>Huéspedes y DNI · ${guests.length}</summary>
     <p>Corredores seleccionados y técnicos asignados en el viaje. Para el registro del hotel, cada huésped puede mostrar el documento original.</p>
-    ${guests.map(guest=>`<div class="row"><span>${esc(guest.name)} · ${guest.role} · ${guest.hasDni?'DNI registrado':'DNI pendiente'}</span>
+    ${guests.map(guest=>`<div class="row"><span>${esc(guest.name)} · ${guest.role} · ${guest.hasDni?'Número registrado':'Número pendiente'} · ${guest.photos||0} fotos del DNI</span>
+      ${guest.role==='Técnico'?`<form method="post" data-staff-photo="${esc(guest.id)}">${select('Cara del DNI','side',[['front','Anverso'],['back','Reverso']])}<label>Foto del DNI · JPG o PNG<input type="file" name="file" accept="image/jpeg,image/png" required></label><button type="submit">Guardar foto del técnico</button></form>`:''}
       ${guest.role==='Técnico'?`<form method="post" data-staff-identity="${esc(guest.id)}"><label>Número de documento<input name="dni" maxlength="20" autocomplete="off" required></label><button type="submit">Guardar número</button>${guest.hasDni?'<button type="button" data-remove-identity>Quitar número</button>':''}</form>`:''}</div>`).join('')||'<p>Selecciona corredores o asigna técnicos en la ficha del viaje.</p>'}`;
+  container.querySelectorAll('[data-staff-photo]').forEach(form=>{
+    form.onsubmit=async e=>{
+      e.preventDefault();
+      const button=form.querySelector('button');
+      button.disabled=true;
+      try{
+        await api(path+'/staff/'+encodeURIComponent(form.dataset.staffPhoto)+'/photo','POST',new FormData(form));
+        form.reset();await refreshHotelGuests(container,eventId);message('Foto del DNI del técnico guardada.');
+      }catch(err){message(err.message);}
+      finally{button.disabled=false;}
+    };
+  });
   container.querySelectorAll('[data-staff-identity]').forEach(form=>{
     const save=async dni=>{
       try{
@@ -101,7 +114,7 @@ async function eventTravelPanel(panel,event){
   const ctx={staff:staff.records,vehicle:vehicles.records};
   const spec=moduleSpecs.travel.filter(([key])=>key!=='event');
   let published=event.callStatus==='Publicada';
-  const hotelLink=()=>me.documents?(published?`<a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel">Descargar listado del hotel con DNI</a>`:'<small>Publica la convocatoria para descargar los DNI del hotel.</small>'):'';
+  const hotelLink=()=>me.documents?(published?`<a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel">Descargar listado del hotel con DNI</a> <a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel/identity-pdf">Descargar PDF privado de DNI</a>`:'<small>Publica la convocatoria para descargar los DNI del hotel.</small>'):'';
   panel.innerHTML=`<h2>Ficha del viaje</h2>
     <div class="toolbar">
       <span class="pill" id="travelCallStatus">Convocatoria: ${published?'Publicada':'Borrador'}</span>

@@ -325,7 +325,7 @@ def test_hotel_export_and_vehicle_reservations(env):
  assert '12345678Z' not in director.get('/api/modules/staff').get_data(as_text=True)
  assert limited.get(first_path+'/hotel/guests').status_code==403
  assert director.get(first_path+'/hotel/guests').json['guests']==[
-  dict(id=staff,name='Mecánico de prueba',role='Técnico',hasDni=True)]
+  dict(id=staff,name='Mecánico de prueba',role='Técnico',hasDni=True,photos=0)]
  assert director.post('/api/modules/travel',json={'event':second,'vehicles':[vehicle]},headers=h).status_code==409
  assert director.post('/api/events/'+second+'/details',json={'date':'2027-03-07'},headers=h).status_code==200
  assert director.post('/api/modules/travel',json={'event':second,'vehicles':[vehicle]},headers=h).status_code==200
@@ -528,3 +528,37 @@ def test_named_rider_accounts_use_real_login_and_existing_profile(env):
  client=app.test_client()
  assert client.post('/api/login',json={'email':'TEST.RIDER','password':'sample-pass'}).status_code==200
  assert client.get('/api/me').json['user']['id']==ids['runner']
+
+
+def test_private_hotel_pdf_contains_only_trip_guest_images(env):
+ import re
+ _,ids,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ other,oh=login('runner2')
+ limited,_=login('director_limited')
+ director.post('/api/events',json={'name':'Hotel PDF'},headers=h)
+ event=director.get('/api/events').json['events'][0]['id']
+ path='/api/events/'+event
+ runner.post(path+'/availability',json={'status':'Disponible'},headers=rh)
+ director.post(path+'/call',json={'users':[ids['runner']]},headers=h)
+ director.post(path+'/details',json={'callStatus':'Publicada'},headers=h)
+ raw=io.BytesIO()
+ Image.new('RGB',(100,70),'blue').save(raw,format='PNG')
+ for client,headers,rider in [(runner,rh,ids['runner']),(other,oh,ids['runner2'])]:
+  assert client.post('/api/documents/'+rider,data={'kind':'dni','file':(io.BytesIO(raw.getvalue()),'dni.png')},headers=headers).status_code==200
+ pdf_image=io.BytesIO()
+ Image.new('RGB',(90,60),'green').save(pdf_image,format='PDF')
+ assert runner.post('/api/documents/'+ids['runner'],data={'kind':'dni_reverso','file':(io.BytesIO(pdf_image.getvalue()),'dni.pdf')},headers=rh).status_code==200
+ staff=director.post('/api/modules/staff',json={'name':'Técnico PDF'},headers=h).json['id']
+ director.post('/api/modules/travel',json={'event':event,'staff':[staff]},headers=h)
+ upload=path+'/hotel/staff/'+staff+'/photo'
+ assert director.post(upload,data={'side':'front','file':(io.BytesIO(raw.getvalue()),'front.png')},headers=h).status_code==200
+ assert limited.get(path+'/hotel/identity-pdf').status_code==403
+ assert runner.get(path+'/hotel/identity-pdf').status_code==403
+ pdf=director.get(path+'/hotel/identity-pdf')
+ assert pdf.status_code==200
+ assert pdf.data.startswith(b'%PDF-')
+ from pypdf import PdfReader
+ assert len(PdfReader(io.BytesIO(pdf.data)).pages)==4
+ assert pdf.headers['Cache-Control']=='no-store'
