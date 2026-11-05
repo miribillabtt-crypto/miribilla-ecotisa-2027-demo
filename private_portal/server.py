@@ -537,6 +537,8 @@ def create_app(test_config=None):
         seed_calendar(Sessions,Record,cipher)
     from settlements import register_settlements
     register_settlements(app,Record,User,CLOTHES,seal,unseal,audit,require,body)
+    from resources import register_resources
+    register_resources(app,Record,seal,unseal,audit,require,body)
     from modules import register_modules
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
     from invoices import register_invoices

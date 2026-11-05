@@ -240,7 +240,84 @@ async function shopPage(c){
   finally{button.disabled=false;}
  });
 }
-async function resourcesPage(c){c.innerHTML='<h1>Técnicos y vehículos</h1><div class="toolbar"><button id="stafftab">Personal técnico</button><button id="vehicletab">Vehículos</button></div><div id="resourcescontent"></div>';document.getElementById('stafftab').onclick=()=>modulePage(document.getElementById('resourcescontent'),'staff').catch(e=>message(e.message));document.getElementById('vehicletab').onclick=()=>modulePage(document.getElementById('resourcescontent'),'vehicle').catch(e=>message(e.message));await modulePage(document.getElementById('resourcescontent'),'staff');}
+async function resourcesPage(c){
+ c.innerHTML='<h1>Técnicos y vehículos</h1><div class="toolbar"><button type="button" id="availabilityTab">Disponibilidad y convocatorias</button><button type="button" id="stafftab">Fichas de técnicos</button><button type="button" id="vehicletab">Fichas de vehículos</button></div><div id="resourcescontent"></div>';
+ const content=c.querySelector('#resourcescontent');
+ c.querySelector('#availabilityTab').onclick=()=>resourceMatrix(content).catch(err=>message(err.message));
+ c.querySelector('#stafftab').onclick=()=>modulePage(content,'staff').catch(err=>message(err.message));
+ c.querySelector('#vehicletab').onclick=()=>modulePage(content,'vehicle').catch(err=>message(err.message));
+ await resourceMatrix(content);
+}
+
+async function resourceMatrix(c){
+ const [calendar,staff,vehicles,travel,overrides]=await Promise.all([
+  api('/events'),api('/modules/staff'),api('/modules/vehicle'),api('/modules/travel'),api('/resource-availability')
+ ]);
+ const events=sortActivities(calendar.events);
+ const statusRows=overrides.records||[];
+ const resources={staff:staff.records,vehicles:vehicles.records};
+ const assignments=new Map(travel.records.map(trip=>[trip.event,trip]));
+ const range=event=>[event.date,event.endDate&&event.endDate>event.date?event.endDate:event.date];
+ const overlap=(first,second)=>{
+  const [a,b]=range(first),[x,y]=range(second);
+  return a&&x&&a<=y&&x<=b;
+ };
+ function status(event,resource,kind){
+  if((assignments.get(event.id)?.[kind]||[]).includes(resource.id)){
+   return {label:kind==='staff'?'Convocado':'Reservado',style:'assigned',fixed:true};
+  }
+  const other=events.find(candidate=>candidate.id!==event.id&&overlap(event,candidate)&&
+   (assignments.get(candidate.id)?.[kind]||[]).includes(resource.id));
+  if(other)return {label:kind==='vehicles'?'Reservado':'No disponible',style:'unavailable',fixed:true,note:other.name};
+  const manual=statusRows.find(row=>row.event===event.id&&row.resource===resource.id);
+  const answer=manual?.status||(kind==='staff'?event.responses?.[resource.user]:null);
+  const label=answer||(kind==='vehicles'?(event.date?'Disponible':'Por confirmar'):'Por confirmar');
+  return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
+ }
+ c.innerHTML=`<h2>Calendario de recursos</h2>
+  <div class="toolbar"><label>Buscar actividad<input type="search" id="resourceSearch" placeholder="Carrera, lugar…"></label>
+   <label>Mes<input type="month" id="resourceMonth"></label><button type="button" id="resourceClear">Ver todo</button></div>
+  <div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado / Reservado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>
+  <p>Abre una actividad pulsando su nombre. Las asignaciones se cargan de la ficha del viaje.${me.role==='director'?' Puedes indicar la disponibilidad en las celdas que aún no están asignadas.':''}</p>
+  <div id="resourceTables"></div>`;
+ const host=c.querySelector('#resourceTables');
+ const search=c.querySelector('#resourceSearch'),month=c.querySelector('#resourceMonth');
+ const render=()=>{
+  const query=search.value.toLocaleLowerCase('es').trim();
+  const filtered=events.filter(event=>(event.name+' '+(event.place||'')).toLocaleLowerCase('es').includes(query)&&
+   (!month.value||activityMonth(event)===month.value||(event.date<month.value+'-01'&&event.endDate>=month.value+'-01')));
+  host.innerHTML=[['staff','Técnicos'],['vehicles','Vehículos']].map(([kind,title])=>{
+   const cols=[...resources[kind]].sort((a,b)=>a.name.localeCompare(b.name,'es'));
+   return `<section class="card"><h2>${title}</h2>${cols.length?`<div class="resource-scroll" role="region" aria-label="Disponibilidad de ${title.toLowerCase()}" tabindex="0"><table class="resource-matrix">
+    <thead><tr><th scope="col">Fecha · actividad</th>${cols.map(resource=>`<th scope="col">${esc(resource.name)}${resource.function?`<small>${esc(resource.function)}</small>`:''}${resource.plate?`<small>${esc(resource.plate)}</small>`:''}</th>`).join('')}</tr></thead>
+    <tbody>${filtered.map(event=>`<tr><th scope="row"><small>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</small><button type="button" data-resource-event="${esc(event.id)}">${esc(event.name)}</button></th>
+    ${cols.map(resource=>{
+     const cell=status(event,resource,kind);
+     return `<td class="resource-cell ${cell.style}">${me.role==='director'&&!cell.fixed?`<select data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
+       ${[['Disponible','Disponible'],['No disponible','No disponible'],['Por confirmar','Por confirmar']].map(([value,label])=>`<option value="${value}" ${cell.label===label||cell.label===value?'selected':''}>${label}</option>`).join('')}
+      </select>`:`<span>${esc(cell.label)}</span>`}${cell.note?`<small>${esc(cell.note)}</small>`:''}</td>`;
+    }).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+1}">No hay actividades con estos filtros.</td></tr>`}</tbody></table></div>`:'<p>Aún no hay recursos registrados. Añádelos desde sus fichas.</p>'}</section>`;
+  }).join('');
+  host.querySelectorAll('[data-resource-event]').forEach(button=>button.onclick=()=>{
+   page='calendar';
+   const content=shell();
+   calendarPage(content,button.dataset.resourceEvent).catch(err=>message(err.message));
+  });
+  host.querySelectorAll('[data-resource]').forEach(select=>select.onchange=async()=>{
+   select.disabled=true;
+   try{
+    const update={event:select.dataset.resourceActivity,resource:select.dataset.resource,status:select.value};
+    await api('/resource-availability','POST',update);
+    const previous=statusRows.find(row=>row.event===update.event&&row.resource===update.resource);
+    if(previous)Object.assign(previous,update);else statusRows.push(update);
+    render();message('Disponibilidad guardada.');
+   }catch(err){message(err.message);render();}
+  });
+ };
+ search.oninput=render;month.onchange=render;
+ c.querySelector('#resourceClear').onclick=()=>{search.value='';month.value='';render();};
+ render();
+}
 async function callsPage(c){const [events,riders]=await Promise.all([api('/events'),api('/roster')]);let list=sortActivities(events.events);if(me.role==='runner')list=list.filter(x=>x.called.includes(me.id)&&x.callStatus==='Publicada');c.innerHTML=`<h1>${me.role==='runner'?'Mis convocatorias':'Convocatorias'}</h1>${me.role==='director'?'<p>Primero recoge disponibilidad en el calendario. Guarda la selección y publica la convocatoria aquí.</p>':''}<label>Buscar prueba o actividad<input id="callsSearch" type="search" placeholder="Ej. Guadiana"></label><div id="callsResults">`+list.map(ev=>`<div class="card" data-activity-search="${esc(ev.name)}"><h2>${esc(ev.name)}</h2><p>${esc(activityDateLabel(ev))} · ${esc(ev.place||'Lugar por confirmar')}</p><span class="pill">${esc(ev.callStatus||'Borrador')}</span><h3>Corredores seleccionados</h3><ul>${ev.called.map(id=>'<li>'+esc(riders.riders.find(r=>r.id===id)?.name||'Corredor')+'</li>').join('')||'<li>Sin corredores seleccionados.</li>'}</ul>${me.role==='director'?`<button data-open-call-event="${esc(ev.id)}">Abrir ficha y convocar</button> <button data-call-publish="${ev.id}" data-status="${ev.callStatus==='Publicada'?'Borrador':'Publicada'}">${ev.callStatus==='Publicada'?'Volver a borrador':'Publicar convocatoria'}</button>`:''}${me.role!=='director'?`<button data-planning="${ev.id}">Planning de viaje</button>`:''}${me.role==='director'?`<a class="button" href="/api/events/${ev.id}/package">Descargar convocatoria y paquete hotel</a>`:''}</div>`).join('')+'<p data-no-activities hidden>No hay convocatorias que coincidan.</p></div>';bindActivitySearch(document.getElementById('callsSearch'),document.getElementById('callsResults'));c.querySelectorAll('[data-open-call-event]').forEach(button=>button.onclick=()=>{page='calendar';const content=shell();calendarPage(content,button.dataset.openCallEvent).catch(err=>message(err.message));});c.querySelectorAll('[data-call-publish]').forEach(b=>b.onclick=async()=>{try{const e=events.events.find(x=>x.id===b.dataset.callPublish);if(b.dataset.status==='Publicada'&&!e.called.length)throw Error('Selecciona corredores antes de publicar.');await api('/events/'+e.id+'/details','POST',{callStatus:b.dataset.status});await callsPage(c);}catch(e){message(e.message);}});c.querySelectorAll('[data-planning]').forEach(b=>b.onclick=()=>navigate('planning'));}
 async function archivePage(c){const d=await api('/archive');c.innerHTML='<h1>Registros archivados</h1><div class="card">'+(d.records.map(r=>`<div class="row"><span>${esc(moduleLabels[r.kind]||r.kind)} · ${esc(r.name||r.concept||r.hotel||r.number||r.date||r.id)}</span><button data-restore="${r.id}">Restaurar</button></div>`).join('')||'No hay registros archivados.')+'</div>';c.querySelectorAll('[data-restore]').forEach(b=>b.onclick=async()=>{try{await api('/archive/'+b.dataset.restore+'/restore','POST',{});await archivePage(c);}catch(e){message(e.message);}});}
 async function bankPreview(e){try{const file=e.target.files[0];if(!file)return;const text=(await file.text()).replace(/^\uFEFF/,'').trim(),lines=text.split(/\r?\n/);let parsed=[];for(const line of lines.slice(1)){const cells=line.split(';');if(cells.length<3)throw Error('Formato esperado: fecha;concepto;importe;referencia');let date=cells[0].trim();if(/^\d{2}\/\d{2}\/\d{4}$/.test(date))date=date.split('/').reverse().join('-');const amount=Number(cells[2].trim().replace(',','.'));if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(amount))throw Error('Fecha o importe no válido');parsed.push({date,concept:cells[1].trim(),amount:Math.round(Math.abs(amount)*100),direction:amount<0?'Gasto':'Ingreso',reference:(cells[3]||'').trim(),matched:''});}const panel=document.getElementById('bankpreview');panel.innerHTML='<p>'+parsed.length+' movimientos para revisar</p><div class="scroll"><table><tr><th>Fecha</th><th>Concepto</th><th>Importe</th></tr>'+parsed.map(r=>`<tr><td>${esc(r.date)}</td><td>${esc(r.concept)}</td><td>${r.direction==='Gasto'?'-':''}${euros(r.amount)}</td></tr>`).join('')+'</table></div><button id="confirmBank" type="button">Confirmar importación</button>';document.getElementById('confirmBank').onclick=async()=>{try{await api('/bank/import','POST',{rows:parsed});await navigate('bank');message('Movimientos importados.');}catch(err){message(err.message);}};}catch(err){message(err.message);}}

@@ -570,3 +570,19 @@ def test_private_hotel_pdf_contains_only_trip_guest_images(env):
  assert all(guest['id']!=ids['runner2'] for guest in files)
  assert runner.get(path+'/hotel/identity-files').status_code==403
 
+
+
+def test_resource_availability_restricts_assignments(env):
+ _,_,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ director.post('/api/events',json={'name':'Matriz','date':'2027-03-01'},headers=h)
+ event=director.get('/api/events').json['events'][0]['id']
+ vehicle=director.post('/api/modules/vehicle',json={'name':'Furgo'},headers=h).json['id']
+ payload={'event':event,'resource':vehicle,'status':'No disponible'}
+ assert runner.post('/api/resource-availability',json=payload,headers=rh).status_code==403
+ assert director.post('/api/resource-availability',json=payload,headers=h).status_code==200
+ assert director.post('/api/modules/travel',json={'event':event,'vehicles':[vehicle]},headers=h).status_code==409
+ assert director.post('/api/resource-availability',json={**payload,'status':'Disponible'},headers=h).status_code==200
+ assert director.post('/api/modules/travel',json={'event':event,'vehicles':[vehicle]},headers=h).status_code==200
+ assert director.post('/api/resource-availability',json=payload,headers=h).status_code==409

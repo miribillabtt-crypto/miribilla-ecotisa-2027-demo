@@ -129,6 +129,19 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   return start,max(start,event.get('endDate') or start)
 
  def check_vehicle_reservations(data,event,skip=None):
+  from resources import availability_key
+  for resource_id in data.get('staff',[])+data.get('vehicles',[]):
+   status=g.db.get(Record,availability_key(data['event'],resource_id))
+   if status and unseal(status.data)['status']=='No disponible':
+    abort(409,'Uno de los recursos está marcado como no disponible para esta actividad')
+   resource=g.db.get(Record,resource_id)
+   if resource and resource.kind=='module:staff':
+    person=unseal(resource.data).get('user')
+    if person and not status:
+     import hashlib
+     response=g.db.get(Record,hashlib.sha256((data['event']+':'+person).encode()).hexdigest())
+     if response and unseal(response.data).get('status')=='No disponible':
+      abort(409,'Un técnico ha indicado que no está disponible')
   if not data.get('vehicles'):return
   start,end=travel_range(event)
   if not start:abort(400,'Indica la fecha de inicio de la actividad antes de reservar vehículos')

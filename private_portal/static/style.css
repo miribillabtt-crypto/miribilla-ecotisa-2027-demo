@@ -32,3 +32,20 @@
  .calendar-controls input{min-width:0;width:100%}
  .invoice-ocr .toolbar>button{min-height:46px}
 }
+
+.resource-scroll{overflow:auto;max-height:70vh;border:1px solid #c6d2dc;border-radius:8px}
+.resource-matrix{border-collapse:separate;border-spacing:0;min-width:100%;width:max-content}
+.resource-matrix th,.resource-matrix td{border-right:1px solid #d5dfe7;border-bottom:1px solid #d5dfe7;min-width:160px;padding:10px}
+.resource-matrix thead th{position:sticky;top:0;z-index:2;background:#173c5b;color:white;text-align:center}
+.resource-matrix thead small{color:#dae8f3}
+.resource-matrix tbody th{position:sticky;left:0;z-index:1;background:#f7fafc;min-width:240px;max-width:280px}
+.resource-matrix thead th:first-child{left:0;z-index:3}
+.resource-matrix tbody th button{width:100%;text-align:left;white-space:normal}
+.resource-state{padding:8px 12px;border-radius:6px}
+.resource-cell{text-align:center;font-weight:600}
+.resource-cell select{width:100%;border-color:currentColor;background:transparent;min-height:44px}
+.available{background:#dcf3e5;color:#17552f}
+.assigned{background:#ffebc4;color:#734500}
+.unavailable{background:#fbe0df;color:#842f2b}
+.pending{background:#edf0f4;color:#4d5b6a}
+@media(max-width:800px){.resource-matrix tbody th{min-width:180px;max-width:200px}.resource-matrix th,.resource-matrix td{min-width:145px}.resource-scroll{max-height:65vh}}
