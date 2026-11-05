@@ -404,7 +404,10 @@ def create_app(test_config=None):
                 from PIL import ImageOps
                 im=ImageOps.exif_transpose(im)
                 if im.width*im.height>20_000_000:abort(400)
-                out=io.BytesIO();im.convert('RGB').save(out,format='JPEG',quality=90);raw=out.getvalue()
+                if kind in PRIVATE_TYPES:
+                    mime='image/png' if raw.startswith(b'\x89PNG\r\n\x1a\n') else 'image/jpeg'
+                else:
+                    out=io.BytesIO();im.convert('RGB').save(out,format='JPEG',quality=90);raw=out.getvalue()
             except HTTPException:raise
             except Exception:abort(400,'Imagen no válida')
         total=g.db.scalar(select(func.coalesce(func.sum(Document.size),0)))
@@ -421,7 +424,7 @@ def create_app(test_config=None):
         if d.kind in PHOTO_TYPES and g.user.role=='communication':allowed=bool(unseal(u.profile).get('photoConsent'))
         if not allowed:abort(403)
         audit('document_downloaded',d.id)
-        return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=True,download_name=d.kind+('.pdf' if d.mime=='application/pdf' else '.jpg'))
+        return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=True,download_name=d.kind+({'application/pdf':'.pdf','image/png':'.png'}.get(d.mime,'.jpg')))
     @app.post('/api/file/<file_id>/delete')
     @require('director','runner')
     def delete_file(file_id):

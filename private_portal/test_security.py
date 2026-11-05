@@ -562,3 +562,11 @@ def test_private_hotel_pdf_contains_only_trip_guest_images(env):
  from pypdf import PdfReader
  assert len(PdfReader(io.BytesIO(pdf.data)).pages)==4
  assert pdf.headers['Cache-Control']=='no-store'
+ files=director.get(path+'/hotel/identity-files').json['guests']
+ selected=next(guest for guest in files if guest['id']==ids['runner'])
+ assert len(selected['files'])==2
+ image_file=next(file for file in selected['files'] if file['format']=='PNG')
+ assert director.get('/api/file/'+image_file['id']).data==raw.getvalue()
+ assert all(guest['id']!=ids['runner2'] for guest in files)
+ assert runner.get(path+'/hotel/identity-files').status_code==403
+

@@ -77,11 +77,17 @@ if(kind==='entry'&&out.amount<=0)throw Error('Introduce un importe mayor que cer
 async function refreshHotelGuests(container,eventId){
   if(!container)return;
   const path='/events/'+encodeURIComponent(eventId)+'/hotel';
-  const {guests=[]}=await api(path+'/guests');
+  const [people,attachments]=await Promise.all([api(path+'/guests'),api(path+'/identity-files')]);
+  const guests=people.guests||[];
+  const filesByGuest=new Map((attachments.guests||[]).map(guest=>[guest.id,guest.files]));
   container.innerHTML=`<summary>Huéspedes y DNI · ${guests.length}</summary>
-    <p>Corredores seleccionados y técnicos asignados en el viaje. Para el registro del hotel, cada huésped puede mostrar el documento original.</p>
-    ${guests.map(guest=>`<div class="row"><span>${esc(guest.name)} · ${guest.role} · ${guest.hasDni?'Número registrado':'Número pendiente'} · ${guest.photos||0} fotos del DNI</span>
-      ${guest.role==='Técnico'?`<form method="post" data-staff-photo="${esc(guest.id)}">${select('Cara del DNI','side',[['front','Anverso'],['back','Reverso']])}<label>Foto del DNI · JPG o PNG<input type="file" name="file" accept="image/jpeg,image/png" required></label><button type="submit">Guardar foto del técnico</button></form>`:''}
+    <div class="toolbar">
+      <a class="button" href="/api/events/${encodeURIComponent(eventId)}/hotel/identity-pdf">Descargar DNI de todos · PDF único</a>
+
+    </div><p>DNI guardados de los corredores seleccionados y técnicos asignados en este viaje.</p>
+    ${guests.map(guest=>`<div class="row"><span>${esc(guest.name)} · ${guest.role} · ${guest.hasDni?'Número registrado':'Número pendiente'} · ${guest.photos||0} archivos del DNI</span>
+      <div>${(filesByGuest.get(guest.id)||[]).map(file=>`<a class="button" href="/api/file/${encodeURIComponent(file.id)}">Descargar ${esc(file.side)} · ${esc(file.format)}</a>`).join(' ')||'<small>Documento pendiente de subir</small>'}</div>
+      ${guest.role==='Técnico'?`<form method="post" data-staff-photo="${esc(guest.id)}">${select('Cara del DNI','side',[['front','Anverso'],['back','Reverso']])}<label>DNI · PDF, JPG o PNG<input type="file" name="file" accept="image/jpeg,image/png,application/pdf" required></label><button type="submit">Guardar documento del técnico</button></form>`:''}
       ${guest.role==='Técnico'?`<form method="post" data-staff-identity="${esc(guest.id)}"><label>Número de documento<input name="dni" maxlength="20" autocomplete="off" required></label><button type="submit">Guardar número</button>${guest.hasDni?'<button type="button" data-remove-identity>Quitar número</button>':''}</form>`:''}</div>`).join('')||'<p>Selecciona corredores o asigna técnicos en la ficha del viaje.</p>'}`;
   container.querySelectorAll('[data-staff-photo]').forEach(form=>{
     form.onsubmit=async e=>{

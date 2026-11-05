@@ -21,7 +21,20 @@ def register_hotel_documents(app, Record, Document, hotel_people, audit, require
         latest = {}
         for row in rows:
             latest.setdefault(row.kind, row)
-        return list(latest.values())
+        return sorted(latest.values(),key=lambda row:(row.kind,row.id))
+
+    @app.get('/api/events/<event_id>/hotel/identity-files')
+    @require('director')
+    def identity_files(event_id):
+        _,guests=hotel_people(event_id)
+        result=[]
+        for guest in guests:
+            files=[]
+            for document in documents(guest):
+                side='Reverso' if document.kind=='dni_reverso' or document.kind.endswith(':back') else 'Anverso'
+                files.append(dict(id=document.id,side=side,format=document.mime.split('/')[-1].upper()))
+            result.append(dict(id=guest['id'],files=files))
+        return jsonify(guests=result)
 
     @app.post('/api/events/<event_id>/hotel/staff/<staff_id>/photo')
     @require('director')
@@ -33,24 +46,31 @@ def register_hotel_documents(app, Record, Document, hotel_people, audit, require
         upload = request.files.get('file')
         if side not in ('front','back') or not upload:
             abort(400, 'Selecciona la cara del DNI y una imagen')
-        raw = upload.read(3*1024*1024+1)
-        if not raw or len(raw) > 3*1024*1024:
-            abort(400, 'Máximo 3 MB por imagen')
-        try:
-            with Image.open(io.BytesIO(raw)) as image:
-                if image.format not in ('JPEG','PNG') or image.width*image.height > 20_000_000:
-                    abort(400, 'Usa una imagen JPG o PNG')
-                prepared = ImageOps.exif_transpose(image).convert('RGB')
-                output = io.BytesIO()
-                prepared.save(output, format='JPEG', quality=90)
-                raw = output.getvalue()
-        except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
-            abort(400, 'Imagen no válida')
+        raw = upload.read(4*1024*1024+1)
+        if not raw or len(raw) > 4*1024*1024:
+            abort(400, 'Máximo 4 MB por archivo')
+        if raw.startswith(b'%PDF-'):
+            from pypdf.errors import PdfReadError
+            try:
+                reader=PdfReader(io.BytesIO(raw))
+                if reader.is_encrypted or not 1<=len(reader.pages)<=10:
+                    abort(400,'Usa un PDF sin contraseña y de hasta 10 páginas')
+            except (PdfReadError,ValueError,OSError):abort(400,'PDF no válido')
+            mime='application/pdf'
+        else:
+            try:
+                with Image.open(io.BytesIO(raw)) as image:
+                    if image.format not in ('JPEG','PNG') or image.width*image.height > 20_000_000:
+                        abort(400, 'Usa PDF, JPG o PNG')
+                    mime='image/jpeg' if image.format=='JPEG' else 'image/png'
+                    image.verify()
+            except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+                abort(400, 'Imagen no válida')
         total = g.db.scalar(select(func.coalesce(func.sum(Document.size), 0)))
         if total+len(raw) > 400*1024*1024:
             abort(400, 'Almacenamiento completo')
         g.db.add(Document(owner_id=g.user.id, kind='staff-dni:'+staff_id+':'+side,
-                          size=len(raw), mime='image/jpeg', created=int(time.time()),
+                          size=len(raw), mime=mime, created=int(time.time()),
                           content=cipher.encrypt(raw)))
         audit('staff_identity_photo_uploaded', staff_id)
         return jsonify(ok=True)
@@ -59,22 +79,22 @@ def register_hotel_documents(app, Record, Document, hotel_people, audit, require
     @require('director')
     def identity_pdf(event_id):
         event, guests = hotel_people(event_id)
-        if event.get('callStatus') != 'Publicada' or not guests:
-            abort(400, 'Publica la convocatoria antes de descargar el PDF')
-        font = ImageFont.load_default(size=23)
+        if not guests:
+            abort(400, 'Selecciona los corredores y técnicos del viaje antes de descargar el PDF')
+        font = ImageFont.load_default(size=28)
         pages = []
         sequence = []
         try:
             for guest in guests:
                 scans = documents(guest)
                 for document in scans or [None]:
-                    page = Image.new('RGB', (1000,1414), 'white')
+                    page = Image.new('RGB', (1240,1754), 'white')
                     draw = ImageDraw.Draw(page)
                     draw.text((45,35), 'Documentación privada del equipo', fill='black', font=font)
                     name_lines = []
                     for word in guest['name'].split():
                         candidate = (name_lines[-1]+' '+word) if name_lines else word
-                        if name_lines and draw.textlength(candidate,font=font) < 900:
+                        if name_lines and draw.textlength(candidate,font=font) < 1130:
                             name_lines[-1] = candidate
                         else:
                             name_lines.append(word)
@@ -89,15 +109,15 @@ def register_hotel_documents(app, Record, Document, hotel_people, audit, require
                         draw.text((45,y), side, fill='black', font=font)
                         y += 40
                         if len(scans)==1:
-                            draw.text((45,1330), 'Solo consta una cara del DNI', fill='black', font=font)
+                            draw.text((45,1670), 'Solo consta una cara del DNI', fill='black', font=font)
                         raw=cipher.decrypt(document.content)
                         if document.mime=='application/pdf':
                             draw.text((45,y), 'Documento PDF adjunto en las páginas siguientes', fill='black', font=font)
                         else:
                             with Image.open(io.BytesIO(raw)) as original:
                                 scan = ImageOps.exif_transpose(original).convert('RGB')
-                                scan.thumbnail((910,1200-y))
-                                page.paste(scan, ((1000-scan.width)//2,y))
+                                scan.thumbnail((1150,1590-y))
+                                page.paste(scan, ((1240-scan.width)//2,y))
                                 scan.close()
                     else:
                         draw.text((45,y), 'DNI escaneado pendiente', fill='black', font=font)
@@ -114,7 +134,7 @@ def register_hotel_documents(app, Record, Document, hotel_people, audit, require
                     writer.append(reader,import_outline=False,excluded_fields=['/Annots','/AA'])
                 else:
                     image_pdf=io.BytesIO()
-                    part.save(image_pdf,format='PDF',resolution=120,quality=65)
+                    part.save(image_pdf,format='PDF',resolution=150,quality=65)
                     writer.append(PdfReader(image_pdf),import_outline=False)
             writer.write(stream)
             if stream.tell() > 4*1024*1024:
