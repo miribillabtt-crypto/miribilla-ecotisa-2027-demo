@@ -112,8 +112,17 @@ window.InvoiceOCR=(()=>{
  async function read(file,progress=()=>{},control={}){if(!file)throw Error('Selecciona un documento');if(file.size>4*1024*1024)throw Error('Máximo 4 MB por original.');let worker=null,pdf=null;
  const check=()=>{if(control.cancelled)throw Error('Lectura cancelada');};
  async function ocr(source){check();const t=await library();if(!worker){progress('Preparando lector en español… La primera carga puede tardar.');worker=await t.createWorker('spa',1,{workerPath:CDN+'tesseract.js@7.0.0/dist/worker.min.js',corePath:CDN+'tesseract.js-core@7.0.0',langPath:CDN+'@tesseract.js-data/spa@1.0.0/4.0.0',workerBlobURL:true,gzip:true,logger:m=>{if(m.status==='recognizing text')progress('Leyendo texto: '+Math.round((m.progress||0)*100)+' %');}});control.worker=worker;}check();const r=await worker.recognize(source,{}, {text:true,tsv:true});check();
- const layout=spatialText(r.data.tsv);
- return layout||r.data.text||'';}
+ let result=spatialText(r.data.tsv)||r.data.text||'';
+ if(control.documentType==='identity'&&control.hasIdentityNumber&&!control.hasIdentityNumber(result)){
+  progress('Revisando el número del DNI con otra lectura…');
+  await worker.setParameters({tessedit_pageseg_mode:'11'});
+  const retry=await worker.recognize(source,{}, {text:true,tsv:true});
+  check();
+  const alternative=spatialText(retry.data.tsv)||retry.data.text||'';
+  if(control.hasIdentityNumber(alternative))result=result+'\n'+alternative;
+  await worker.setParameters({tessedit_pageseg_mode:'3'});
+ }
+ return result;}
  try{check();if(/^image\//.test(file.type)||/\.(png|jpe?g|webp)$/i.test(file.name)){progress('Leyendo fotografía en este dispositivo…');const text=await ocr(file);return {text,method:'OCR de imagen',pages:1};}
  if(file.type==='application/pdf'||/\.pdf$/i.test(file.name)){progress('Abriendo PDF en este dispositivo…');const lib=await import(CDN+'pdfjs-dist@6.5.438/build/pdf.mjs');lib.GlobalWorkerOptions.workerSrc=CDN+'pdfjs-dist@6.5.438/build/pdf.worker.mjs';check();pdf=await lib.getDocument({data:new Uint8Array(await file.arrayBuffer()),isEvalSupported:false,disableFontFace:true,useSystemFonts:true}).promise;const texts=[],limit=Math.min(pdf.numPages,8);let scanned=false;
  for(let i=1;i<=limit;i++){check();progress('Leyendo página '+i+' de '+limit);const pg=await pdf.getPage(i),tc=await pg.getTextContent(),lines=new Map();for(const t of tc.items){if(!t.str?.trim())continue;const y=Math.round((t.transform?.[5]||0)/3),x=t.transform?.[4]||0;if(!lines.has(y))lines.set(y,[]);lines.get(y).push({x,str:t.str});}let piece=[...lines].sort((a,b)=>b[0]-a[0]).map(([,items])=>items.sort((a,b)=>a.x-b.x).map(x=>x.str).join(' ')).join('\n');const sparse=piece.replace(/\s/g,'').length<35;if(sparse||(control.documentType!=='identity'&&i===limit&&!Number.isFinite(parse([...texts,piece].join('\n')).amount))){scanned=true;progress('PDF escaneado · OCR de página '+i);const normal=pg.getViewport({scale:1}),viewport=pg.getViewport({scale:Math.min(3,1979/normal.width,3000/normal.height)}),canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);try{await pg.render({canvasContext:canvas.getContext('2d'),viewport}).promise;const scannedText=await ocr(canvas);if(sparse||Number.isFinite(parse(scannedText).amount))piece=scannedText;}finally{canvas.width=canvas.height=0;}}texts.push(piece);pg.cleanup();}return {text:texts.join('\n'),method:scanned?'PDF con OCR':'Texto del PDF',pages:limit,truncated:pdf.numPages>limit};}

@@ -14,6 +14,25 @@ window.IdentityOCR=(()=>{
   const weights=[7,3,1];
   return String([...text].reduce((sum,char,index)=>sum+(char==='<'?0:parseInt(char,36))*weights[index%3],0)%10);
  }
+ function identityNumber(text){
+  const source=normalize(text);
+  const normalizedDigits=value=>value.replace(/[OQ]/g,'0').replace(/[IL]/g,'1').replace(/Z/g,'2').replace(/S/g,'5').replace(/B/g,'8');
+  const matches=[...source.matchAll(/(?<![A-Z0-9])([XYZ]?[0-9OQILSBZ](?:[ .-]*[0-9OQILSBZ]){6,7})[ .-]*([A-Z852])(?![A-Z0-9])/g)];
+  const valid=[];
+  for(const match of matches){
+   const compact=match[1].replace(/[ .-]/g,'');
+   let digits;
+   if(/^[XYZ]/.test(compact)&&compact.length===8)digits=String('XYZ'.indexOf(compact[0]))+normalizedDigits(compact.slice(1));
+   else if(compact.length===8)digits=normalizedDigits(compact);
+   else continue;
+   if(!/^\d{8}$/.test(digits))continue;
+   const letter=({8:'B',5:'S',2:'Z'})[match[2]]||match[2];
+   if('TRWAGMYFPDXBNJZSQVHLCKE'[Number(digits)%23]!==letter)continue;
+   valid.push((/^[XYZ]/.test(compact)?compact[0]+digits.slice(1):digits)+letter);
+  }
+  const unique=[...new Set(valid)];
+  return unique.length===1?unique[0]:'';
+ }
  function parse(raw){
   const lines=String(raw||'').split(/[\r\n]+/).map(line=>line.replace(/\s+/g,' ').trim()).filter(Boolean);
   const result={};
@@ -44,11 +63,15 @@ window.IdentityOCR=(()=>{
    if(birth)result.birth=birth;
   }
   const text=normalize(lines.join('\n'));
-  const candidates=[...text.matchAll(/\b(\d{8})[ -]?([A-Z])\b/g)];
-  const dnis=[...new Set(candidates.filter(match=>'TRWAGMYFPDXBNJZSQVHLCKE'[Number(match[1])%23]===match[2]).map(match=>match[1]+match[2]))];
-  if(dnis.length===1)result.dni=dnis[0];
+  const dni=identityNumber(text);
+  if(dni)result.dni=dni;
   const mrz=lines.map(line=>normalize(line).replace(/\s/g,''));
   const mrzIndex=mrz.findIndex(line=>/^IDESP[A-Z0-9<]{25}$/.test(line));
+  if(mrzIndex>=0){
+   const optional=mrz[mrzIndex].slice(15).replace(/</g,' ');
+   const number=identityNumber(optional);
+   if(number&&!result.dni)result.dni=number;
+  }
   if(mrzIndex>=0&&mrz[mrzIndex+1]?.length===30){
    const dates=mrz[mrzIndex+1],birth=dates.slice(0,6);
    if(/^\d{6}$/.test(birth)&&checkDigit(birth)===dates[6]){
@@ -81,7 +104,7 @@ window.IdentityOCR=(()=>{
   }
   return result;
  }
- return {parse};
+ return {parse,identityNumber};
 })();
 
 function addIdentityOCR(upload,profile){
@@ -98,7 +121,7 @@ function addIdentityOCR(upload,profile){
   if(!['dni','dni_reverso'].includes(kind)){status.textContent='Selecciona DNI anverso o reverso para completar la ficha.';return;}
   if(!file){status.textContent='Selecciona una foto o PDF del DNI.';return;}
   if(current)current.cancelled=true;
-  const attempt=++sequence,control={documentType:'identity'};
+  const attempt=++sequence,control={documentType:'identity',hasIdentityNumber:text=>Boolean(IdentityOCR.parse(text).dni)};
   current=control;button.disabled=true;cancel.hidden=false;status.textContent='Preparando documento…';output.textContent='';
   try{
    const prepared=await prepareIdentityFile(file);
@@ -113,6 +136,12 @@ function addIdentityOCR(upload,profile){
    }
    if(fields.dni&&profile.elements.dniStatus)profile.elements.dniStatus.value='Leído por OCR · pendiente de revisión';
    output.innerHTML=count?'<p class="note">Datos completados. Revisa los campos y pulsa Guardar ficha para confirmarlos.</p>':'<p>No se han detectado datos fiables. Prueba otra foto con buena luz o completa los campos manualmente.</p>';
+   if(!fields.dni){
+    const note=document.createElement('p');
+    note.className='note';
+    note.textContent='No se ha podido confirmar el número del DNI. Haz otra foto del anverso o introdúcelo en el campo DNI.';
+    output.append(note);
+   }
    status.textContent='Lectura terminada.';
   }catch(err){
    if(attempt===sequence&&!control.cancelled)status.textContent=err.message;
