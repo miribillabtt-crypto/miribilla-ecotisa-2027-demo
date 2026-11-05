@@ -241,16 +241,18 @@ async function shopPage(c){
  });
 }
 async function resourcesPage(c){
- c.innerHTML='<h1>Técnicos y vehículos</h1><div class="toolbar"><button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button></div><div id="resourcescontent"></div>';
+ c.innerHTML='<h1>Técnicos y vehículos</h1><div class="toolbar"><button type="button" id="availabilityTab">Disponibilidad y convocatorias</button><button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button></div><div id="resourcescontent"></div>';
  const content=c.querySelector('#resourcescontent');
  const show=async kind=>{
+  c.querySelector('#availabilityTab').classList.toggle('active',kind==='all');
   c.querySelector('#stafftab').classList.toggle('active',kind==='staff');
   c.querySelector('#vehicletab').classList.toggle('active',kind==='vehicles');
   await resourceMatrix(content,kind);
  };
+ c.querySelector('#availabilityTab').onclick=()=>show('all').catch(err=>message(err.message));
  c.querySelector('#stafftab').onclick=()=>show('staff').catch(err=>message(err.message));
  c.querySelector('#vehicletab').onclick=()=>show('vehicles').catch(err=>message(err.message));
- await show('staff');
+ await show('all');
 }
 
 async function resourceMatrix(c,section){
@@ -278,7 +280,7 @@ async function resourceMatrix(c,section){
   const label=answer||(kind==='vehicles'?(event.date?'Disponible':'Por confirmar'):'Por confirmar');
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
- c.innerHTML=`<h2>${section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2><button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>
+ c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
   <div class="toolbar"><label>Buscar actividad<input type="search" id="resourceSearch" placeholder="Carrera, lugar…"></label>
    <label>Mes<input type="month" id="resourceMonth"></label><button type="button" id="resourceClear">Ver todo</button></div>
   <div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado / Reservado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>
@@ -290,7 +292,7 @@ async function resourceMatrix(c,section){
   const query=search.value.toLocaleLowerCase('es').trim();
   const filtered=events.filter(event=>(event.name+' '+(event.place||'')).toLocaleLowerCase('es').includes(query)&&
    (!month.value||activityMonth(event)===month.value||(event.date<month.value+'-01'&&event.endDate>=month.value+'-01')));
-  host.innerHTML=[['staff','Técnicos'],['vehicles','Vehículos']].filter(([kind])=>kind===section).map(([kind,title])=>{
+  host.innerHTML=[['staff','Técnicos'],['vehicles','Vehículos']].filter(([kind])=>section==='all'||kind===section).map(([kind,title])=>{
    const cols=[...resources[kind]].sort((a,b)=>a.name.localeCompare(b.name,'es'));
    return `<section class="card"><h2>${title}</h2>${cols.length?`<div class="resource-scroll" role="region" aria-label="Disponibilidad de ${title.toLowerCase()}" tabindex="0"><table class="resource-matrix">
     <thead><tr><th scope="col">Fecha · actividad</th>${cols.map(resource=>`<th scope="col">${esc(resource.name)}${resource.function?`<small>${esc(resource.function)}</small>`:''}${resource.plate?`<small>${esc(resource.plate)}</small>`:''}</th>`).join('')}</tr></thead>
@@ -318,7 +320,8 @@ async function resourceMatrix(c,section){
    }catch(err){message(err.message);render();}
   });
  };
- c.querySelector('#manageResources').onclick=()=>modulePage(c,section==='staff'?'staff':'vehicle').catch(err=>message(err.message));
+ const manage=c.querySelector('#manageResources');
+ if(manage)manage.onclick=()=>modulePage(c,section==='staff'?'staff':'vehicle').catch(err=>message(err.message));
  search.oninput=render;month.onchange=render;
  c.querySelector('#resourceClear').onclick=()=>{search.value='';month.value='';render();};
  render();
