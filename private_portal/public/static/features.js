@@ -29,6 +29,7 @@ async function modulePage(c,kind,editing=null,event=null){
 const [ctx,d]=await Promise.all([getContext(kind),api('/modules/'+kind+(event?'?event='+encodeURIComponent(event.id):''))]);
 if(event)ctx.fixedEvent=event;
 const redraw=(id=null)=>modulePage(c,kind,id,event);
+const issuedStaff=new Map();
 moduleContext=ctx;const spec=moduleSpecs[kind];let rows=d.records;if(kind==='license')rows.sort((a,b)=>(ctx.riders.find(r=>r.id===a.rider)?.name||'').localeCompare(ctx.riders.find(r=>r.id===b.rider)?.name||'','es'));const canEdit=me.role==='director';if(me.role==='communication'&&kind!=='post')throw Error('Sin permiso');const edit=editing?rows.find(x=>x.id===editing)||{}:kind==='entry'?{event:event?.id||'',direction:'Gasto',status:'Pendiente',category:'Otros'}:{};let subnav='';if(me.role==='director'&&!event&&['entry','budget','bank','charge'].includes(kind))subnav=`<div class="toolbar">${[['conta','Ingresos y gastos'],['budgets','Presupuesto'],['bank','Banco'],['charges','Cobros por corredor']].map(([id,label])=>`<button data-finance="${id}">${label}</button>`).join('')}</div>`;
 let totals='';if(kind==='days'){const total=rows.reduce((sum,r)=>sum+r.days,0);totals='<div class="note">Total de días registrados: <b>'+total+'</b></div>';}if(event){
   const subtotals=new Map();
@@ -82,12 +83,54 @@ function table(){const query=(document.getElementById('moduleSearch').value||'')
  document.getElementById('openNew').click();
  document.getElementById('moduleForm').elements.rider.value=button.dataset.newLicense;
 });
-c.querySelectorAll('[data-edit]').forEach(b=>b.onclick=()=>redraw(b.dataset.edit).catch(e=>message(e.message)));c.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Archivar este registro? Se puede restaurar desde Archivados.'))return;try{await api('/modules/'+kind+'/'+b.dataset.archive+'/archive','POST',{});await redraw();}catch(e){message(e.message);}});}
+c.querySelectorAll('[data-edit]').forEach(b=>{
+ b.onclick=()=>redraw(b.dataset.edit).catch(e=>message(e.message));
+ if(kind==='staff')bindStaffPassword(b,rows.find(row=>row.id===b.dataset.edit),issuedStaff);
+});c.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Archivar este registro? Se puede restaurar desde Archivados.'))return;try{await api('/modules/'+kind+'/'+b.dataset.archive+'/archive','POST',{});await redraw();}catch(e){message(e.message);}});}
 table();document.getElementById('moduleSearch').oninput=table;if(document.getElementById('licenseStatus'))document.getElementById('licenseStatus').onchange=table;c.querySelectorAll('[data-finance]').forEach(b=>b.onclick=()=>navigate(b.dataset.finance));if(canEdit){document.getElementById('openNew').onclick=async()=>{
  if(event&&editing){try{await redraw();}catch(err){message(err.message);return;}}
  document.getElementById('moduleEditor').hidden=false;
 };document.getElementById('cancelEdit').onclick=()=>redraw().catch(e=>message(e.message));bindForm('moduleForm',async(f,data)=>{if(f.dataset.ocrReview==='true'&&!f.elements.ocrReviewed?.checked)throw Error('Revisa los datos detectados y marca la confirmación antes de guardar.');const out={};for(const [key,,type] of spec){if(type==='money'){const v=Number(data[key]);if(!Number.isFinite(v)||v<0)throw Error('Importe no válido');out[key]=Math.round(v*100);}else if(type==='integer')out[key]=Number(data[key]);else if(String(type).endsWith('[]'))out[key]=new FormData(f).getAll(key);else out[key]=data[key]||'';}if(event){out.event=event.id;out.direction='Gasto';}
 if(kind==='entry'&&out.amount<=0)throw Error('Introduce un importe mayor que cero.');const savedId=editing||f.dataset.invoiceSavedId||'';const saved=await api('/modules/'+kind+(savedId?'/'+savedId:''),'POST',out);if(kind==='entry'&&f.invoiceOriginal){const id=savedId||saved.id;f.dataset.invoiceSavedId=id;const upload=new FormData();upload.append('file',f.invoiceOriginal);try{await api('/invoices/'+id,'POST',upload);}catch(error){throw Error('El apunte ya está guardado, pero no el original: '+error.message+'. Puedes volver a pulsar Guardar para adjuntarlo sin duplicar el gasto.');}}await redraw();message(kind==='entry'&&f.invoiceOriginal?'Apunte y original guardados.':'Registro guardado.');});}if(kind==='entry'&&canEdit)addInvoiceOCR(c,ctx);if(kind==='bank'&&canEdit){document.getElementById('bankcsv').onchange=bankPreview;await bankPanel(c.querySelector('#bankReconciliation'));}if(kind==='vehicle')await vehicleAvailability(c,rows,ctx.events);}
+function bindStaffPassword(editButton,staff,issued){
+ const button=document.createElement('button');
+ button.type='button';
+ const output=document.createElement('div');
+ output.setAttribute('aria-live','polite');
+ editButton.before(button);
+ editButton.parentElement.append(output);
+ const render=()=>{
+  const account=issued.get(staff.id);
+  const linked=Boolean(staff.user||account);
+  button.hidden=linked&&!me.owner;
+  button.textContent=linked?'Cambiar contraseña':'Generar contraseña';
+  if(account)showTechnicianCredentials(output,[account]);
+ };
+ render();
+ button.onclick=async()=>{
+  const replace=Boolean(staff.user||issued.has(staff.id));
+  if(replace&&!confirm('¿Cambiar la contraseña de '+staff.name+'? Se cerrarán sus sesiones y la contraseña anterior dejará de funcionar.'))return;
+  button.disabled=true;
+  try{
+   message('');
+   const {accounts:[account]}=await api('/staff/accounts','POST',{staffId:staff.id,replace});
+   issued.set(staff.id,account);
+   render();
+  }catch(error){message(error.message);}
+  finally{button.disabled=false;}
+ };
+}
+function showTechnicianCredentials(container,accounts){
+ container.innerHTML=`<p>Copia cada usuario y contraseña antes de salir de esta pantalla.</p>
+  ${accounts.map(({name,username,password})=>`<div class="row"><strong>${esc(name)}</strong>
+    <label>Usuario y contraseña<textarea rows="2" readonly spellcheck="false">${esc(username)}&#10;${esc(password)}</textarea></label>
+    <button type="button" data-copy-technician>Copiar acceso</button></div>`).join('')}`;
+ container.querySelectorAll('[data-copy-technician]').forEach(button=>button.onclick=async()=>{
+  const input=button.parentElement.querySelector('textarea');
+  try{await navigator.clipboard.writeText(input.value);button.textContent='Copiado';}
+  catch{input.focus();input.select();}
+ });
+}
 async function refreshHotelGuests(container,eventId){
   if(!container)return;
   const path='/events/'+encodeURIComponent(eventId)+'/hotel';
@@ -323,15 +366,7 @@ async function resourceMatrix(c,section){
    if(!accounts.length)return;
    issued.push(...accounts);
    results.hidden=false;
-   results.innerHTML=`<p>Copia cada usuario y contraseña antes de salir de esta pantalla.</p>
-    ${issued.map(({name,username,password})=>`<div class="row"><strong>${esc(name)}</strong>
-      <label>Usuario y contraseña<textarea rows="2" readonly spellcheck="false">${esc(username)}&#10;${esc(password)}</textarea></label>
-      <button type="button" data-copy-technician>Copiar acceso</button></div>`).join('')}`;
-   results.querySelectorAll('[data-copy-technician]').forEach(button=>button.onclick=async()=>{
-    const input=button.parentElement.querySelector('textarea');
-    try{await navigator.clipboard.writeText(input.value);button.textContent='Copiado';}
-    catch{input.focus();input.select();}
-   });
+   showTechnicianCredentials(results,issued);
    if(skipped.length)c.querySelector('#technicianAccountStatus').textContent+=` ${skipped.length} fichas ya tenían un acceso o una cuenta con ese nombre.`;
    resources.staff=(await api('/modules/staff')).records;
    if(host.isConnected)render();

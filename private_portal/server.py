@@ -304,8 +304,13 @@ def create_app(test_config=None):
         if g.db.get_bind().dialect.name=='postgresql':
             g.db.execute(sql_text('SELECT pg_advisory_xact_lock(20273004)'))
         staff=g.db.scalars(select(Record).where(Record.kind=='module:staff').order_by(Record.id).with_for_update()).all()
+        individual='staffId' in d
+        if individual:
+            staff_id=text(d,'staffId',40)
+            staff=[record for record in staff if record.id==staff_id]
+            if not staff:abort(404,'Ficha de técnico no encontrada')
         technician_names={normalize(name) for name in g.db.scalars(select(User.name).where(User.role=='technician'))}
-        if 'name' in d:
+        if not individual and 'name' in d:
             name=' '.join(text(d,'name',150).split())
             if not name:abort(400,'Introduce el nombre y los apellidos')
             key=normalize(name)
@@ -319,25 +324,48 @@ def create_app(test_config=None):
         for record in staff:
             data=unseal(record.data)
             name=data['name']
-            if data.get('user') or normalize(name) in technician_names:
+            user=None
+            if individual and data.get('user'):
+                user=g.db.get(User,data['user'],with_for_update=True)
+                if not user or not user.active or user.role!='technician' or user.owner or user.documents:
+                    abort(409,'Revisa el usuario vinculado a esta ficha')
+                if user.password and not g.user.owner:
+                    abort(403,'Solo la cuenta responsable de Dirección puede cambiar una contraseña existente')
+                if user.password and d.get('replace') is not True:
+                    abort(409,'Confirma el cambio de contraseña')
+            if not user and (data.get('user') or normalize(name) in technician_names):
+                if individual:abort(409,'Ya existe una cuenta con ese nombre. Vincúlala desde Editar.')
                 skipped.append(name)
                 continue
             base='.'.join(re.findall(r'[a-z0-9]+',normalize(name).lower()))[:80].rstrip('.') or 'tecnico'
-            username=base
-            suffix=2
-            while username in usernames or g.db.get(Record,alias_key(username)):
-                username=f'{base}.{suffix}'
-                suffix+=1
-            words=[secrets.choice(STAFF_PASSWORD_WORDS) for _ in range(3)]
-            password='-'.join([*words,f'{secrets.randbelow(100000):05}'])
-            user=User(id=uid(),email=username,name=name,role='technician',profile=seal({}),
-                      password=generate_password_hash(password,method='scrypt:32768:8:1'))
-            g.db.add(user)
-            data['user']=user.id
-            record.data=seal(data)
+            username=user.email if user and user.email and '@' not in user.email else base
+            alias=None
+            if not user or username!=user.email:
+                suffix=2
+                while True:
+                    alias=g.db.get(Record,alias_key(username))
+                    if username not in usernames and (not alias or user and alias.owner_id==user.id):break
+                    username=f'{base}.{suffix}'
+                    suffix+=1
+            surname=base.rsplit('.',1)[-1].capitalize()
+            words=[secrets.choice(STAFF_PASSWORD_WORDS) for _ in range(2)]
+            password='-'.join([surname,*words,f'{secrets.randbelow(10000000):07}'])
+            if user:
+                if username!=user.email and not alias:
+                    g.db.add(Record(id=alias_key(username),kind='system:login-alias',owner_id=user.id,
+                                    data=seal(dict(username=username))))
+                g.db.execute(delete(LoginSession).where(LoginSession.user_id==user.id))
+                g.db.execute(update(Invite).where(Invite.reset_user==user.id,Invite.used==False).values(used=True))
+                audit('technician_password_changed',user.id)
+            else:
+                user=User(id=uid(),email=username,name=name,role='technician',profile=seal({}))
+                g.db.add(user)
+                data['user']=user.id
+                record.data=seal(data)
+                audit('technician_account_created',user.id)
+            user.password=generate_password_hash(password,method='scrypt:32768:8:1')
             usernames.add(username)
             technician_names.add(normalize(name))
-            audit('technician_account_created',user.id)
             accounts.append(dict(name=name,username=username,password=password))
         return jsonify(accounts=sorted(accounts,key=lambda account:normalize(account['name'])),skipped=sorted(skipped))
 

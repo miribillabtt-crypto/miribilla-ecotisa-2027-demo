@@ -69,6 +69,34 @@ def test_direction_provisions_linked_technician_accounts(env):
   assert user['role']=='technician' and not user['owner'] and not user['documents']
   assert client.get('/api/users').status_code==403
 
+def test_technician_password_from_existing_staff_row(env):
+ app,ids,login,_=env
+ director,h=login('director')
+ limited,lh=login('director_limited')
+ technician,th=login('technician')
+ staff_path='/api/modules/staff'
+ path='/api/staff/accounts'
+ staff=director.post(staff_path,json={'name':'Eva Núñez'},headers=h).json['id']
+ assert technician.post(path,json={'staffId':staff},headers=th).status_code==403
+ account=limited.post(path,json={'staffId':staff},headers=lh).json['accounts'][0]
+ assert account['username']=='eva.nunez' and account['password'].startswith('Nunez-')
+ assert limited.post(path,json={'staffId':staff,'replace':True},headers=lh).status_code==403
+ assert director.post(path,json={'staffId':staff},headers=h).status_code==409
+ client=app.test_client()
+ assert client.post('/api/login',json={'email':account['username'],'password':account['password']}).status_code==200
+ renewed=director.post(path,json={'staffId':staff,'replace':True},headers=h).json['accounts'][0]
+ assert renewed['username']==account['username'] and renewed['password']!=account['password']
+ assert client.get('/api/me').json['user'] is None
+ assert client.post('/api/login',json={'email':renewed['username'],'password':renewed['password']}).status_code==200
+ linked=director.post(staff_path,json={'name':'Aitor Peña','user':ids['technician']},headers=h).json['id']
+ access=director.post(path,json={'staffId':linked,'replace':True},headers=h).json['accounts'][0]
+ assert access['username']=='aitor.pena'
+ client=app.test_client()
+ assert client.post('/api/login',json={'email':access['username'],'password':access['password']}).status_code==200
+ assert client.get('/api/me').json['user']['id']==ids['technician']
+ invalid=director.post(staff_path,json={'name':'Otra ficha','user':ids['runner']},headers=h).json['id']
+ assert director.post(path,json={'staffId':invalid,'replace':True},headers=h).status_code==409
+
 def test_runner_cannot_read_other_profile(env):
  _,ids,login,_=env;c,h=login('runner')
  assert c.get('/api/profile/'+ids['runner2']).status_code==403
