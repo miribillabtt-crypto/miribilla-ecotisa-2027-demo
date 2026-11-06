@@ -470,6 +470,31 @@ def test_roster_registration_links_attach_to_existing_runner(env):
  assert client.post('/api/login',json={k:activation[k] for k in ('email','password')}).status_code==200
  assert client.get('/api/me').json['user']['id']==ids['runner']
 
+def test_direction_can_register_rider_directly(env):
+ app,_,login,_=env
+ director,h=login('director_limited')
+ runner,rh=login('runner')
+ path='/api/roster'
+ data={'firstName':'Álex','surname':'De Prueba','invite':True}
+ assert runner.post(path,json=data,headers=rh).status_code==403
+ assert director.post(path,json={'firstName':'Álex'},headers=h).status_code==400
+ created=director.post(path,json=data,headers=h)
+ assert created.status_code==201,created.json
+ rider=created.json['rider']
+ assert rider in director.get(path).json['riders']
+ duplicate=director.post(path,json={**data,'firstName':'alex','surname':'DE  PRUEBA'},headers=h)
+ assert duplicate.status_code==409
+ without_invite=director.post(path,json={'firstName':'Otro','surname':'Corredor'},headers=h)
+ assert without_invite.status_code==201 and 'invitation' not in without_invite.json
+ client=app.test_client()
+ token=created.json['invitation']['token']
+ assert client.post('/api/activate/start',json={'token':token}).json['chooseEmail']
+ credentials={'email':'nuevo@test.invalid','password':'clave-de-prueba'}
+ assert client.post('/api/activate/finish',json={**credentials,'token':token}).status_code==200
+ assert client.post('/api/login',json=credentials).status_code==200
+ assert client.get('/api/me').json['user']['id']==rider['id']
+ assert client.get('/api/profile/'+rider['id']).json['profile']=={'firstName':'Álex','surname':'De Prueba'}
+
 
 def test_club_contract_pdf_is_private_and_downloads_unchanged(env):
  _,ids,login,_=env

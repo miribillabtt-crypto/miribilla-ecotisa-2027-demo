@@ -10,6 +10,7 @@ from werkzeug.exceptions import HTTPException
 import pyotp
 from openpyxl import Workbook
 from PIL import Image
+from roster_import import normalize
 
 Base=declarative_base()
 def uid(): return secrets.token_hex(16)
@@ -258,6 +259,12 @@ def create_app(test_config=None):
         related=Invite.reset_user==u.id if roster_activation else Invite.email==i.email
         g.db.execute(update(Invite).where(related,Invite.used==False).values(used=True))
         i.used=True;audit('account_activated',u.id);return jsonify(ok=True)
+    def issue_rider_invite(rider, expires):
+        token=secrets.token_urlsafe(40)
+        g.db.add(Invite(token=digest(token),email='',name=rider.name,role='runner',reset_user=rider.id,secret=seal(pyotp.random_base32()),expires=expires))
+        audit('rider_invited',rider.id)
+        return dict(name=rider.name,token=token)
+
     @app.post('/api/roster/invites')
     @require('director')
     def roster_invites():
@@ -272,10 +279,7 @@ def create_app(test_config=None):
         invitations=[]
         for rider in riders:
             g.db.execute(update(Invite).where(Invite.reset_user==rider.id,Invite.email=='',Invite.used==False).values(used=True))
-            token=secrets.token_urlsafe(40)
-            g.db.add(Invite(token=digest(token),email='',name=rider.name,role='runner',reset_user=rider.id,secret=seal(pyotp.random_base32()),expires=expires))
-            invitations.append(dict(name=rider.name,token=token))
-            audit('rider_invited',rider.id)
+            invitations.append(issue_rider_invite(rider,expires))
         return jsonify(invitations=sorted(invitations,key=lambda item:item['name']),expires=expires)
 
     @app.get('/api/users')
@@ -482,6 +486,31 @@ def create_app(test_config=None):
     def roster():
         # Never serialize ORM users: sensitive columns are deliberately excluded.
         return jsonify(riders=[{'id':u.id,'name':u.name} for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True).order_by(User.name))] if g.user.role in ('director','communication','technician') else [{'id':g.user.id,'name':g.user.name}])
+    @app.post('/api/roster')
+    @require('director')
+    def create_rider():
+        d=body()
+        first=' '.join(text(d,'firstName',100).split())
+        surname=' '.join(text(d,'surname',180).split())
+        if not first or not surname:abort(400,'Introduce el nombre y los apellidos')
+        name=f'{first} {surname}'
+        if g.db.get_bind().dialect.name=='postgresql':
+            # Share the roster import lock so both paths check for duplicates in turn.
+            g.db.execute(sql_text('SELECT pg_advisory_xact_lock(20271818)'))
+        key=normalize(name)
+        names=g.db.scalars(select(User.name).where(User.role=='runner'))
+        if any(normalize(existing)==key for existing in names):
+            abort(409,'Ya existe una ficha con ese nombre y apellidos')
+        rider=User(name=name,role='runner',profile=seal(dict(firstName=first,surname=surname)))
+        g.db.add(rider)
+        g.db.flush()
+        audit('rider_created',rider.id)
+        result=dict(rider=dict(id=rider.id,name=rider.name))
+        if d.get('invite') is True:
+            expires=int(time.time())+7*86400
+            result.update(invitation=issue_rider_invite(rider,expires),expires=expires)
+        return jsonify(result),201
+
     @app.get('/api/clothes')
     @require('director')
     def clothes():return jsonify(riders=[{'id':u.id,'name':u.name,'sizes':unseal(u.profile).get('sizes',{}),'quantities':unseal(u.profile).get('quantities',{})} for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True))])

@@ -164,28 +164,56 @@ async function calendarPage(c,selectedId){
     await calendarPage(c);
   });
 }
+function showRiderInvites(results,invitations){
+  results.innerHTML=invitations.map(({name,token})=>`<div class="row"><label>${esc(name)}<input class="secret" readonly value="${esc(inviteLink(token))}"></label><button type="button">Copiar enlace</button></div>`).join('');
+  results.querySelectorAll('button').forEach(button=>button.onclick=async()=>{
+    const input=button.parentElement.querySelector('input');
+    try{await navigator.clipboard.writeText(input.value);button.textContent='Copiado';}
+    catch{input.focus();input.select();}
+  });
+}
 async function rosterPage(c){
   roster=(await api('/roster')).riders;
   const accounts=me.owner?(await api('/users')).users:[];
   const eligible=new Set(accounts.filter(u=>u.active&&u.role==='runner'&&!u.accountReady&&!u.email).map(u=>u.id));
   c.innerHTML=`<h1>Corredores</h1>
+    <details class="card"><summary>Dar de alta corredor</summary>
+      <form id="createRider">
+        <label>Nombre<input name="firstName" maxlength="100" required></label>
+        <label>Apellidos<input name="surname" maxlength="180" required></label>
+        <label class="checkline"><input type="checkbox" name="invite" checked> Generar enlace de registro</label>
+        <button type="submit" class="primary">Guardar corredor</button>
+      </form>
+    </details>
+    <div id="riderCreated" class="card" hidden>
+      <p id="riderCreatedMessage" role="status"></p>
+      <button type="button" id="openNewRider">Abrir ficha</button>
+      <div id="newRiderInvite"></div>
+    </div>
     ${eligible.size?`<form id="rosterInvites" class="card"><h2>Enlaces de registro para corredores</h2>
     <p>Marca los corredores que quieres invitar. Cada enlace sirve para una sola ficha y caduca en 7 días. Generar otro para ese corredor sustituye el anterior.</p>
     ${roster.filter(r=>eligible.has(r.id)).map(r=>`<label class="checkline"><input type="checkbox" name="rider" value="${esc(r.id)}" checked>${esc(r.name)}</label>`).join('')}
     <button type="submit" class="primary">Generar enlaces de registro</button><div id="rosterInviteResults" aria-live="polite"></div></form>`:''}
     <div class="card">${roster.map(r=>`<div class="row"><strong>${esc(r.name)}</strong><button type="button" data-profile="${esc(r.id)}">Abrir ficha</button></div>`).join('')||'Aún no hay corredores registrados.'}</div>`;
   c.querySelectorAll('[data-profile]').forEach(b=>b.onclick=()=>profilePage(c,b.dataset.profile).catch(e=>message(e.message)));
+  bindForm('createRider',async(form,{firstName,surname})=>{
+    const {rider,invitation}=await api('/roster','POST',{firstName,surname,invite:form.elements.invite.checked});
+    if(!form.isConnected)return;
+    form.reset();
+    form.closest('details').open=false;
+    await rosterPage(c).catch(()=>message('La ficha se ha creado. Vuelve a Corredores para actualizar el listado.'));
+    const result=c.querySelector('#riderCreated');
+    if(!result)return;
+    c.querySelector('#riderCreatedMessage').textContent=`${rider.name} ya está dado de alta.${invitation?' El enlace de registro caduca en 7 días.':''}`;
+    c.querySelector('#openNewRider').onclick=()=>profilePage(c,rider.id).catch(e=>message(e.message));
+    if(invitation)showRiderInvites(c.querySelector('#newRiderInvite'),[invitation]);
+    result.hidden=false;
+  });
   bindForm('rosterInvites',async form=>{
     const riders=new FormData(form).getAll('rider');
     if(!riders.length)throw Error('Selecciona al menos un corredor.');
     const {invitations}=await api('/roster/invites','POST',{riders});
-    const results=c.querySelector('#rosterInviteResults');
-    results.innerHTML=invitations.map(({name,token})=>`<div class="row"><label>${esc(name)}<input class="secret" readonly value="${esc(inviteLink(token))}"></label><button type="button">Copiar enlace</button></div>`).join('');
-    results.querySelectorAll('button').forEach(button=>button.onclick=async()=>{
-      const input=button.parentElement.querySelector('input');
-      try{await navigator.clipboard.writeText(input.value);button.textContent='Copiado';}
-      catch{input.focus();input.select();}
-    });
+    showRiderInvites(c.querySelector('#rosterInviteResults'),invitations);
   });
 }
 async function prepareIdentityFile(file){
