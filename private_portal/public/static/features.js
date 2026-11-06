@@ -47,8 +47,9 @@ let totals='';if(kind==='days'){const total=rows.reduce((sum,r)=>sum+r.days,0);t
  totals=`<div class="metricgrid"><div class="card">Cargos registrados<strong class="metric">${euros(charged)}</strong></div><div class="card">Pagado<strong class="metric">${euros(paid)}</strong></div><div class="card">Pendiente<strong class="metric">${euros(charged-paid)}</strong></div></div>`;
 }else if(['entry','budget','bank'].includes(kind)){let income=rows.filter(x=>x.direction==='Ingreso').reduce((s,x)=>s+x.amount,0),expense=rows.filter(x=>x.direction==='Gasto').reduce((s,x)=>s+x.amount,0);totals=kind==='entry'||kind==='bank'?`<div class="note">Ingresos: <b>${euros(income)}</b> · Gastos: <b>${euros(expense)}</b> · Saldo: <b>${euros(income-expense)}</b></div>`:`<div class="note">Total: <b>${euros(rows.filter(x=>x.status!=='Anulado').reduce((s,x)=>s+x.amount,0))}</b></div>`;if(kind==='entry'){const budgets=ctx.budget;totals+=`<p>Presupuesto de gasto: ${euros(budgets.reduce((s,x)=>s+x.amount,0))} · Disponible: ${euros(budgets.reduce((s,x)=>s+x.amount,0)-expense)}</p>`;}}
 const renderField=f=>event&&['event','direction'].includes(f[0])?`<input type="hidden" name="${f[0]}" value="${esc(f[0]==='event'?event.id:'Gasto')}">`:moduleInput(f,edit,ctx);
-const primaryEntryFields=['amount','direction','date','category','counterparty','concept'];
+const primaryEntryFields=['amount','direction','event','date','category','counterparty','concept'];
 const fields=kind==='entry'?`<p>Solo necesitas indicar el importe. Puedes guardar la foto o el PDF sin usar OCR.</p>
+ <p>Si vinculas el gasto a una actividad, usa <strong>Repartir gasto</strong> en su fila para cargarlo a los convocados.</p>
  <div class="grid">${spec.filter(([key])=>primaryEntryFields.includes(key)).map(renderField).join('')}</div>
  <details class="card"><summary>Más datos opcionales</summary><div class="grid">${spec.filter(([key])=>!primaryEntryFields.includes(key)).map(renderField).join('')}</div></details>`:
  `<div class="grid">${spec.map(renderField).join('')}</div>`;
@@ -70,15 +71,41 @@ if(kind==='entry'&&canEdit){
   </form><small>Deja las fechas vacías para incluir todos los gastos.</small>`;
  c.querySelector('.toolbar').after(exports);
 }
+const eventForExpense=row=>ctx.events.find(activity=>activity.id===row.event);
+const canSplit=row=>row.event&&row.direction==='Gasto'&&row.amount>0&&row.status!=='Anulado';
+async function splitExpenses(activity,selected){
+ if(activity?.callStatus!=='Publicada')throw Error('Publica la convocatoria antes de repartir los gastos.');
+ const expectedRiders=[...new Set(activity.called||[])].sort();
+ if(!expectedRiders.length)throw Error('Selecciona y guarda los corredores de la convocatoria.');
+ const amount=selected.reduce((sum,row)=>sum+row.amount,0);
+ const names=expectedRiders.map(id=>ctx.riders.find(rider=>rider.id===id)?.name||'Corredor convocado');
+ if(!confirm(`¿Cargar ${euros(amount)} de ${activity.name} a ${names.join(', ')}?`))return;
+ const expenses=selected.map(row=>row.id);
+ const result=await api('/events/'+encodeURIComponent(activity.id)+'/split-expenses','POST',{expenses,expectedRiders,expectedTotal:amount});
+ selected.forEach(row=>{row.splitRecorded=true;});
+ table();
+ if(event)c.querySelectorAll('#splitExpenses input[name=expense]').forEach(input=>{
+  if(!expenses.includes(input.value))return;
+  input.checked=false;
+  input.disabled=true;
+  input.parentElement.append(' · Ya repartido');
+ });
+ message(`Cobro de ${euros(result.total)} registrado en ${result.riders===1?'la cuenta del corredor':`las cuentas de ${result.riders} corredores`}.`);
+}
 if(event)bindForm('splitExpenses',async form=>{
- const expenses=new FormData(form).getAll('expense');
- if(!expenses.length)throw Error('Selecciona los gastos que quieres repartir.');
- const amount=rows.filter(row=>expenses.includes(row.id)).reduce((sum,row)=>sum+row.amount,0);
- if(!confirm('¿Repartir '+euros(amount)+' entre los corredores de la convocatoria publicada?'))return;
- const result=await api('/events/'+event.id+'/split-expenses','POST',{expenses});
- await redraw();
- message('Reparto de '+euros(result.total)+' registrado entre '+result.riders+' corredores.');
+ const expenses=new Set(new FormData(form).getAll('expense'));
+ if(!expenses.size)throw Error('Selecciona los gastos que quieres repartir.');
+ await splitExpenses(ctx.events.find(activity=>activity.id===event.id),rows.filter(row=>expenses.has(row.id)));
 });
+function expenseSplitCell(row){
+ if(kind!=='entry')return '';
+ if(row.splitRecorded)return '<td>Ya repartido</td>';
+ if(!canSplit(row))return '<td>—</td>';
+ const activity=eventForExpense(row);
+ if(!activity?.called?.length)return '<td>Sin corredores seleccionados</td>';
+ if(activity.callStatus!=='Publicada')return '<td>Convocatoria por publicar</td>';
+ return `<td><button type="button" data-split-expense="${esc(row.id)}">Repartir gasto</button></td>`;
+}
 function licenseCells(row){
  if(kind!=='license'||!me.documents)return '';
  const photos=row.photos||{};
@@ -86,9 +113,18 @@ function licenseCells(row){
  const download=photos.licencia||photos.licencia_reverso?`<a class="button" href="/api/licenses/${encodeURIComponent(row.rider)}/pdf">Descargar licencia en PDF</a>`:'Sin licencia subida';
  return original+`<td>${download}</td>`;
 }
-function table(){const query=(document.getElementById('moduleSearch').value||'').toLocaleLowerCase('es');const status=document.getElementById('licenseStatus')?.value||'Todos';const filtered=rows.filter(r=>(status==='Todos'||r.status===status)&&spec.map(([key])=>key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec)).join(' ').toLocaleLowerCase('es').includes(query));const columns=event?spec.filter(([key])=>['date','category','budget','concept','counterparty','amount','status'].includes(key)):kind==='entry'?spec.slice(0,6):spec.slice(0,5);document.getElementById('moduleRows').innerHTML=filtered.length?`<div class="card scroll"><table><thead><tr>${columns.map(x=>'<th>'+esc(x[1])+'</th>').join('')}${kind==='entry'?'<th>Justificante original</th>':''}${kind==='budget'?'<th>Gasto asignado</th><th>Disponible</th>':''}${kind==='license'&&me.documents?'<th>Anverso</th><th>Reverso</th><th>Descarga</th>':''}<th>Detalle</th>${canEdit?'<th>Acciones</th>':''}</tr></thead><tbody>${filtered.map(r=>`<tr>${columns.map(([key])=>'<td>'+esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))+'</td>').join('')}${kind==='entry'?`<td>${(r.attachments||[]).map(a=>`<a href="/api/invoice-file/${a.id}">${esc(a.name)}</a>`).join('<br>')||'Sin adjuntar'}</td>`:''}${kind==='budget'?`<td>${euros(r.spent)}</td><td>${euros(r.amount-r.spent)}</td>`:''}${licenseCells(r)}<td><details><summary>Ver ficha</summary><dl>${spec.filter(([key])=>r[key]!==undefined).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))}</dd>`).join('')}</dl></details></td>${canEdit&&kind==='license'&&!r.id?`<td><button data-new-license="${esc(r.rider)}">Añadir ficha</button></td>`:canEdit?`<td><button data-edit="${r.id}">Editar</button> <button data-archive="${r.id}">Archivar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="card">Sin registros para mostrar.</div>';c.querySelectorAll('[data-new-license]').forEach(button=>button.onclick=()=>{
+function table(){const query=(document.getElementById('moduleSearch').value||'').toLocaleLowerCase('es');const status=document.getElementById('licenseStatus')?.value||'Todos';const filtered=rows.filter(r=>(status==='Todos'||r.status===status)&&spec.map(([key])=>key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec)).join(' ').toLocaleLowerCase('es').includes(query));const columns=event?spec.filter(([key])=>['date','category','budget','concept','counterparty','amount','status'].includes(key)):kind==='entry'?spec.slice(0,6):spec.slice(0,5);document.getElementById('moduleRows').innerHTML=filtered.length?`<div class="card scroll"><table><thead><tr>${columns.map(x=>'<th>'+esc(x[1])+'</th>').join('')}${kind==='entry'?'<th>Justificante original</th><th>Cobro a convocados</th>':''}${kind==='budget'?'<th>Gasto asignado</th><th>Disponible</th>':''}${kind==='license'&&me.documents?'<th>Anverso</th><th>Reverso</th><th>Descarga</th>':''}<th>Detalle</th>${canEdit?'<th>Acciones</th>':''}</tr></thead><tbody>${filtered.map(r=>`<tr>${columns.map(([key])=>'<td>'+esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))+'</td>').join('')}${kind==='entry'?`<td>${(r.attachments||[]).map(a=>`<a href="/api/invoice-file/${a.id}">${esc(a.name)}</a>`).join('<br>')||'Sin adjuntar'}</td>`:''}${kind==='budget'?`<td>${euros(r.spent)}</td><td>${euros(r.amount-r.spent)}</td>`:''}${expenseSplitCell(r)}${licenseCells(r)}<td><details><summary>Ver ficha</summary><dl>${spec.filter(([key])=>r[key]!==undefined).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))}</dd>`).join('')}</dl></details></td>${canEdit&&kind==='license'&&!r.id?`<td><button data-new-license="${esc(r.rider)}">Añadir ficha</button></td>`:canEdit?`<td><button data-edit="${r.id}">Editar</button> <button data-archive="${r.id}">Archivar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="card">Sin registros para mostrar.</div>';c.querySelectorAll('[data-new-license]').forEach(button=>button.onclick=()=>{
  document.getElementById('openNew').click();
  document.getElementById('moduleForm').elements.rider.value=button.dataset.newLicense;
+});
+c.querySelectorAll('[data-split-expense]').forEach(button=>button.onclick=async()=>{
+ button.disabled=true;
+ try{
+  message('');
+  const expense=rows.find(row=>row.id===button.dataset.splitExpense);
+  await splitExpenses(eventForExpense(expense),[expense]);
+ }catch(error){message(error.message);}
+ finally{button.disabled=false;}
 });
 c.querySelectorAll('[data-edit]').forEach(b=>{
  b.onclick=()=>redraw(b.dataset.edit).catch(e=>message(e.message));

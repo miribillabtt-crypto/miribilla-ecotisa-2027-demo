@@ -21,10 +21,14 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
         event = unseal(record(event_id, 'event', True).data)
         if event.get('callStatus') != 'Publicada':
             abort(400, 'Publica la convocatoria antes de repartir los gastos')
-        ids = body().get('expenses')
+        data = body()
+        ids = data.get('expenses')
         if not isinstance(ids, list) or not 1 <= len(ids) <= 100 or any(not isinstance(i, str) for i in ids):
             abort(400, 'Selecciona los gastos que se cargarán a los corredores')
-        riders = [g.db.get(User, rid) for rid in sorted(set(event.get('called', [])))]
+        called = sorted(set(event.get('called', [])))
+        if 'expectedRiders' in data and data['expectedRiders'] != called:
+            abort(409, 'La convocatoria ha cambiado. Recarga la actividad y revisa los corredores antes de repartir.')
+        riders = [g.db.get(User, rid) for rid in called]
         if not riders or any(not rider or rider.role != 'runner' for rider in riders):
             abort(400, 'Revisa los corredores convocados')
         expense_ids = sorted(set(ids))
@@ -41,6 +45,8 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
             total += expense['amount']
         if total <= 0:
             abort(400, 'El importe total debe ser mayor que cero')
+        if 'expectedTotal' in data and data['expectedTotal'] != total:
+            abort(409, 'El importe ha cambiado. Recarga los gastos antes de repartir.')
         quotient, remainder = divmod(total, len(riders))
         for index, rider in enumerate(riders):
             share = quotient + int(index < remainder)

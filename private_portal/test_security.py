@@ -556,6 +556,29 @@ def test_trip_share_conserves_cents_and_prevents_duplicate_charge(env):
  charges=director.get('/api/modules/charge').json['records']
  assert sorted(row['amount'] for row in charges)==[500,501]
 
+def test_linked_expense_charges_the_published_runner_after_confirmation(env):
+ _,ids,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ other,_=login('runner2')
+ assert director.post('/api/events',json={'name':'Carrera de prueba'},headers=h).status_code==200
+ event=director.get('/api/events').json['events'][0]['id']
+ path='/api/events/'+event
+ assert runner.post(path+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
+ assert director.post(path+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
+ expense=director.post('/api/modules/entry',json={'event':event,'direction':'Gasto','amount':2300},headers=h).json['id']
+ charges='/api/modules/charge'
+ payload={'expenses':[expense],'expectedRiders':[ids['runner']],'expectedTotal':2300}
+ assert runner.get(charges).json['records']==[]
+ assert director.post(path+'/split-expenses',json=payload,headers=h).status_code==400
+ assert director.post(path+'/details',json={'callStatus':'Publicada'},headers=h).status_code==200
+ assert director.post(path+'/split-expenses',json={**payload,'expectedRiders':[ids['runner2']]},headers=h).status_code==409
+ assert director.post(path+'/split-expenses',json={**payload,'expectedTotal':2299},headers=h).status_code==409
+ assert director.post(path+'/split-expenses',json=payload,headers=h).status_code==200
+ assert director.post(path+'/split-expenses',json=payload,headers=h).status_code==409
+ assert [row['amount'] for row in runner.get(charges).json['records']]==[2300]
+ assert other.get(charges).json['records']==[]
+
 
 def test_roster_registration_links_attach_to_existing_runner(env):
  app,ids,login,_=env
