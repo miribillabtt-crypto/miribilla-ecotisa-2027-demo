@@ -545,6 +545,8 @@ def create_app(test_config=None):
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
     from invoices import register_invoices
     register_invoices(app,Record,Document,cipher,seal,unseal,audit,require)
+    from invoice_exports import register_invoice_exports
+    register_invoice_exports(app,Record,Document,cipher,unseal,audit,require)
     rider_accounts=os.environ.get('RIDER_ACCOUNT_SETUP')
     if not app.testing and rider_accounts and rider_accounts!='[]':
         from rider_accounts import provision_rider_accounts,verify_rider_accounts

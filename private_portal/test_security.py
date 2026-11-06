@@ -602,3 +602,40 @@ def test_rider_health_details_are_private(env):
  assert not set(data).intersection(limited.get(path).json['profile'])
  assert limited.post(path,json=data,headers=lh).status_code==403
  assert runner.post(path,json={'medicationStatus':'Otro'},headers=h).status_code==400
+
+
+def test_invoice_presentation_exports_match_expenses_and_attachments(env,tmp_path):
+ from openpyxl import load_workbook
+ from pypdf import PdfReader
+ _,_,login,_=env
+ director,h=login('director')
+ rider,_=login('runner')
+ base='/api/modules/entry'
+ entry=director.post(base,json={'direction':'Gasto','date':'2027-03-02','amount':7743,'baseAmount':7039,
+   'taxAmount':704,'counterparty':'Hotel de prueba','reference':'TEST-1'},headers=h).json['id']
+ director.post(base,json={'direction':'Gasto','date':'2027-03-03','amount':1200},headers=h)
+ director.post(base,json={'direction':'Ingreso','date':'2027-03-03','amount':99999},headers=h)
+ director.post(base,json={'direction':'Gasto','date':'2027-04-01','amount':400},headers=h)
+ scan=io.BytesIO()
+ Image.new('RGB',(250,450),'white').save(scan,format='PNG')
+ assert director.post('/api/invoices/'+entry,data={'file':(io.BytesIO(scan.getvalue()),'scan.png')},headers=h).status_code==200
+ source=io.BytesIO()
+ Image.new('RGB',(180,260),'blue').save(source,format='PDF')
+ assert director.post('/api/invoices/'+entry,data={'file':(io.BytesIO(source.getvalue()),'scan.pdf')},headers=h).status_code==200
+ period='?from=2027-03-01&to=2027-03-31'
+ xlsx='/api/invoices/report.xlsx'+period
+ pdf='/api/invoices/report.pdf'+period
+ assert rider.get(xlsx).status_code==403
+ assert rider.get(pdf).status_code==403
+ excel=director.get(xlsx)
+ sheet=load_workbook(io.BytesIO(excel.data)).active
+ assert sheet['A2'].value=='G-'+entry[:12].upper()
+ assert sheet['L2'].value==77.43
+ assert sheet['N2'].value==2
+ assert sheet['N3'].value=='Sin adjuntar'
+ assert sheet['L4'].value=='=SUM(L2:L3)'
+ response=director.get(pdf)
+ assert response.status_code==200
+ assert response.headers['Cache-Control']=='no-store'
+ assert len(PdfReader(io.BytesIO(response.data)).pages)==2
+ (tmp_path/'facturas-prueba.pdf').write_bytes(response.data)

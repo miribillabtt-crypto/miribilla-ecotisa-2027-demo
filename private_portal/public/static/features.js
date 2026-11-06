@@ -55,6 +55,20 @@ c.innerHTML=`${event?'<h2>Facturas y gastos de la actividad</h2>':`<h1>${kind===
  <form id="splitExpenses"><p>Marca solo los gastos que se cobran a los corredores. Se dividen a partes iguales entre los convocados de la convocatoria publicada.</p>
  ${rows.filter(row=>row.amount>0&&row.status!=='Anulado').map(row=>`<label class="checkline"><input type="checkbox" name="expense" value="${esc(row.id)}" ${row.splitRecorded?'disabled':''}>${esc(row.concept||row.counterparty||row.category||'Gasto')} · ${euros(row.amount)}${row.splitRecorded?' · Ya repartido':''}</label>`).join('')}
  <button type="submit">Registrar cobros por corredor</button></form></details>`:''}`;
+if(kind==='entry'&&canEdit){
+ const exports=document.createElement('details');
+ exports.className='card';
+ exports.innerHTML=`<summary>Descargar facturas y relación de gastos</summary>
+  <p>El PDF reúne los justificantes adjuntos. El Excel incluye los gastos, su total y los justificantes pendientes.</p>
+  <form method="get" class="toolbar">
+   ${event?`<input type="hidden" name="event" value="${esc(event.id)}">`:''}
+   <label>Desde<input type="date" name="from"></label>
+   <label>Hasta<input type="date" name="to"></label>
+   <button type="submit" formaction="/api/invoices/report.pdf">Descargar facturas en PDF</button>
+   <button type="submit" formaction="/api/invoices/report.xlsx">Descargar relación en Excel</button>
+  </form><small>Deja las fechas vacías para incluir todos los gastos.</small>`;
+ c.querySelector('.toolbar').after(exports);
+}
 if(event)bindForm('splitExpenses',async form=>{
  const expenses=new FormData(form).getAll('expense');
  if(!expenses.length)throw Error('Selecciona los gastos que quieres repartir.');
