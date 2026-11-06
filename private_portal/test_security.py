@@ -501,6 +501,43 @@ def test_shop_charge_once_and_license_sides(env,monkeypatch):
  assert other.get('/api/file/'+licenses[ids['runner']]['photos']['licencia']).status_code==403
 
 
+def test_director_downloads_runner_license_as_private_pdf(env):
+ from pypdf import PdfReader, PdfWriter
+
+ app,ids,login,_=env
+ director,_=login('director')
+ limited,_=login('director_limited')
+ runner,rh=login('runner')
+ path='/api/licenses/'+ids['runner']+'/pdf'
+ assert app.test_client().get(path).status_code==401
+ assert limited.get(path).status_code==403
+ assert runner.get(path).status_code==403
+ assert director.get(path).status_code==404
+ upload='/api/documents/'+ids['runner']
+ image=io.BytesIO()
+ Image.new('RGB',(800,500),'navy').save(image,format='JPEG')
+ image.seek(0)
+ assert runner.post(upload,data={'kind':'licencia','file':(image,'front.jpg')},headers=rh).status_code==200
+ front=director.get(path)
+ assert front.status_code==200
+ assert len(PdfReader(io.BytesIO(front.data)).pages)==1
+ pdf=io.BytesIO()
+ original=PdfWriter()
+ original.add_blank_page(width=350,height=220)
+ original.write(pdf)
+ pdf.seek(0)
+ assert runner.post(upload,data={'kind':'licencia_reverso','file':(pdf,'back.pdf')},headers=rh).status_code==200
+ result=director.get(path)
+ assert result.status_code==200 and result.mimetype=='application/pdf'
+ assert 'attachment; filename="Licencia_runner.pdf"'==result.headers['Content-Disposition']
+ assert result.headers['Cache-Control']=='no-store'
+ combined=PdfReader(io.BytesIO(result.data))
+ assert len(combined.pages)==2
+ assert [item.title for item in combined.outline]==['Anverso','Reverso']
+ assert combined.pages[1].mediabox.width==350
+ assert director.get('/api/licenses/'+ids['runner2']+'/pdf').status_code==404
+
+
 def test_trip_share_conserves_cents_and_prevents_duplicate_charge(env):
  _,ids,login,_=env
  director,h=login('director')

@@ -1,7 +1,7 @@
 """Team modules: encrypted records, explicit role allowlists, no demo data."""
 import io,csv,datetime,time
 from decimal import Decimal,InvalidOperation
-from flask import g,request,jsonify,abort,send_file
+from flask import g,request,jsonify,abort,send_file,Response
 from sqlalchemy import select
 from openpyxl import Workbook
 from bank_reconciliation import bank_lock, bank_fingerprint, validate_bank_link
@@ -23,9 +23,16 @@ SPECS={
 }
 TECH={'staff','vehicle','travel','result','days','sport'}
 MONEY={'entry','budget','bank','charge'}
+LICENSE_SIDES={'licencia':'Anverso','licencia_reverso':'Reverso'}
 
 def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def rows(kind):return list(g.db.scalars(select(Record).where(Record.kind=='module:'+kind)))
+ def license_documents(rider_id):
+  documents=g.db.scalars(select(Document).where(Document.owner_id==rider_id,Document.kind.in_(list(LICENSE_SIDES)))
+                         .order_by(Document.created.desc(),Document.id.desc()))
+  latest={}
+  for document in documents:latest.setdefault(document.kind,document)
+  return {kind:latest[kind] for kind in LICENSE_SIDES if kind in latest}
  def allowed(kind,write=False):
   if kind not in SPECS:abort(404)
   role=g.user.role
@@ -233,9 +240,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
      item=dict(rider=rider.id,status='No aportada')
      records.append(item)
     if g.user.documents:
-     documents=g.db.scalars(select(Document).where(Document.owner_id==rider.id,Document.kind.in_(['licencia','licencia_reverso'])).order_by(Document.created.desc(),Document.id.desc()))
-     item['photos']={}
-     for document in documents:item['photos'].setdefault(document.kind,document.id)
+     item['photos']={kind:document.id for kind,document in license_documents(rider.id).items()}
   if kind=='budget':
    spent={}
    for row in rows('entry'):
@@ -245,6 +250,43 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
      spent[part]=spent.get(part,0)+entry['amount']
    for item in records:item['spent']=spent.get(item['id'],0)
   return jsonify(records=records)
+
+ @app.get('/api/licenses/<rider_id>/pdf')
+ @require('director')
+ def license_pdf(rider_id):
+  from PIL import Image
+  from pypdf import PdfReader, PdfWriter
+  from pypdf.errors import PdfReadError
+  from werkzeug.utils import secure_filename
+  from invoice_exports import scan_page
+
+  if not g.user.documents:abort(403)
+  rider=g.db.get(User,rider_id)
+  if not rider or rider.role!='runner':abort(404)
+  documents=license_documents(rider_id)
+  if not documents:abort(404,'Este corredor aún no tiene una licencia subida')
+  cipher=app.extensions['cipher']
+  writer=PdfWriter()
+  for kind,document in documents.items():
+   side=LICENSE_SIDES[kind]
+   raw=io.BytesIO(cipher.decrypt(document.content))
+   try:
+    if document.mime=='application/pdf':
+     reader=PdfReader(raw)
+     if reader.is_encrypted or not reader.pages:raise PdfReadError('PDF unavailable')
+    else:
+     with Image.open(raw) as image:
+      reader=scan_page(f'Licencia · {side} · {rider.name}',image)
+    writer.append(reader,outline_item=side,import_outline=False,excluded_fields=['/Annots','/AA'])
+   except (PdfReadError,OSError,ValueError,TypeError):
+    abort(422,f'No se pudo abrir el archivo de la licencia ({side.lower()})')
+  output=io.BytesIO()
+  writer.write(output)
+  output.seek(0)
+  filename='Licencia_'+(secure_filename(rider.name) or rider.id)+'.pdf'
+  audit('license_pdf_exported',rider.id)
+  return Response(iter(lambda:output.read(64*1024),b''),mimetype='application/pdf',
+                  headers={'Content-Disposition':f'attachment; filename="{filename}"'})
  @app.post('/api/modules/<kind>')
  @require()
  def create_record(kind):
