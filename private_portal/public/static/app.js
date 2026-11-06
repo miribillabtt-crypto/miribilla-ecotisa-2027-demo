@@ -116,7 +116,8 @@ async function calendarPage(c,selectedId){
     const day=index-offset+1;
     if(day<1||day>days)return '<div class="calendar-cell calendar-blank"></div>';
     const key=calendarDateKey(new Date(year,month-1,day));
-    return `<div class="calendar-cell"><span>${day}</span>${rows.filter(e=>e.date&&e.date<=key&&(e.date===key||e.endDate>=key)).map(activity).join('')}</div>`;
+    const dateLabel=director?`<button type="button" class="calendar-day" data-create-event-date="${key}" aria-label="Crear actividad el ${day} de ${calendarMonths[month-1]} de ${year}">${day} <span aria-hidden="true">+</span></button>`:`<span>${day}</span>`;
+    return `<div class="calendar-cell">${dateLabel}${rows.filter(e=>e.date&&e.date<=key&&(e.date===key||e.endDate>=key)).map(activity).join('')}</div>`;
   }).join('');
   const monthEnd=calendarDateKey(new Date(year,month,0));
   const monthStart=calendarDateKey(first);
@@ -136,16 +137,18 @@ async function calendarPage(c,selectedId){
       <label>Mes <input id="calendarMonth" type="month" value="${calendarMonth}"></label>
       <button type="button" data-month-step="1">Siguiente</button>
     </div>
-    <div class="calendar-scroll"><div class="calendar-grid" aria-label="${calendarMonths[month-1]} ${year}">
+    ${director?`<p>Pulsa un día del calendario para crear una carrera o actividad en esa fecha.</p>
+    <details class="card"><summary>Nueva carrera o actividad</summary><form method="post" id="event">
+      <div class="grid">${field('Actividad','name')}${field('Lugar','place')}${field('Fecha de inicio','date','date')}${field('Fecha de fin (opcional)','endDate','date')}</div>
+      <small>Para una carrera de un solo día, deja vacía la fecha de fin.</small>
+      <button type="submit" class="primary">Crear actividad</button></form></details>`:''}
+    <div class="calendar-scroll${director?' calendar-date-picker':''}"><div class="calendar-grid" aria-label="${calendarMonths[month-1]} ${year}">
     ${['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(day=>`<strong>${day}</strong>`).join('')}${cells}</div></div>
     <section class="mobile-agenda card"><h2>${calendarMonths[month-1]} ${year}</h2>
       ${agenda.map(e=>`<div><small>${esc(activityDateLabel(e))}${e.endDate&&e.endDate!==e.date?' – '+esc(e.endDate):''}</small>${activity(e)}</div>`).join('')||'<p>No hay actividades con día confirmado este mes.</p>'}
     </section>
     ${pending.length?`<section class="card"><h2>${calendarMonths[month-1]} · día por confirmar</h2>${pending.map(activity).join('')}</section>`:''}
-    ${unscheduled.length?`<section class="card"><h2>Actividades sin fecha</h2>${unscheduled.map(activity).join('')}</section>`:''}
-    ${director?`<details class="card"><summary>Nueva carrera o actividad</summary><form method="post" id="event">
-      <div class="grid">${field('Actividad','name')}${field('Fecha · puede quedar pendiente','date','date')}${field('Lugar','place')}</div>
-      <button type="submit" class="primary">Crear actividad</button></form></details>`:''}`;
+    ${unscheduled.length?`<section class="card"><h2>Actividades sin fecha</h2>${unscheduled.map(activity).join('')}</section>`:''}`;
   bindActivitySearch(document.getElementById('calendarSearch'),document.getElementById('calendarSearchResults'));
   const redraw=()=>calendarPage(c).catch(err=>message(err.message));
   c.querySelectorAll('[data-month-step]').forEach(button=>button.onclick=()=>{
@@ -158,10 +161,23 @@ async function calendarPage(c,selectedId){
     redraw();
   };
   c.querySelectorAll('[data-calendar-event]').forEach(button=>button.onclick=()=>calendarPage(c,button.dataset.calendarEvent).catch(err=>message(err.message)));
+  const createForm=c.querySelector('#event');
+  if(createForm){
+    const {date,endDate}=createForm.elements;
+    const updateDateRange=()=>{endDate.min=date.value;};
+    date.oninput=updateDateRange;
+    c.querySelectorAll('[data-create-event-date]').forEach(button=>button.onclick=()=>{
+      date.value=button.dataset.createEventDate;
+      updateDateRange();
+      createForm.closest('details').open=true;
+      createForm.elements.name.focus();
+    });
+  }
   bindForm('event',async(_,data)=>{
     await api('/events','POST',data);
     if(data.date)calendarMonth=data.date.slice(0,7);
     await calendarPage(c);
+    message('Actividad creada.');
   });
 }
 function showRiderInvites(results,invitations){

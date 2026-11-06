@@ -453,11 +453,15 @@ def create_app(test_config=None):
     @require('director')
     def new_event():
         d=body();name=text(d,'name',150);date=text(d,'date',10);place=text(d,'place',150)
+        end_date=text(d,'endDate',10)
         if not name:abort(400,'Indica el nombre')
-        if date:
-            try:datetime.date.fromisoformat(date)
-            except ValueError:abort(400)
-        r=Record(kind='event',owner_id=g.user.id,data=seal(dict(name=name,date=date,place=place,called=[])));g.db.add(r);audit('event_created');return jsonify(ok=True)
+        try:
+            if date:date=datetime.date.fromisoformat(date).isoformat()
+            if end_date:end_date=datetime.date.fromisoformat(end_date).isoformat()
+        except ValueError:abort(400,'Revisa las fechas de la actividad')
+        if end_date and (not date or end_date<date):
+            abort(400,'La fecha de fin requiere una fecha de inicio y debe ser igual o posterior')
+        r=Record(kind='event',owner_id=g.user.id,data=seal(dict(name=name,date=date,endDate=end_date,place=place,called=[])));g.db.add(r);audit('event_created');return jsonify(ok=True)
     @app.post('/api/events/<event_id>/availability')
     @require('runner','technician')
     def availability(event_id):

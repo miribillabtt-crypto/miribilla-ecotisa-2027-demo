@@ -26,6 +26,23 @@ def test_unauthenticated_denied(env):
  for path in ['/api/users','/api/events','/api/clothes','/api/profile/'+ids['runner'],'/api/documents/'+ids['runner'],'/api/audit']:
   assert c.get(path).status_code==401
 
+def test_direction_creates_events_with_optional_end_date(env):
+ _,_,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ path='/api/events'
+ event={'name':'Vuelta de prueba','date':'2027-02-27','endDate':'2027-03-01'}
+ assert runner.post(path,json=event,headers=rh).status_code==403
+ assert director.post(path,json={**event,'date':''},headers=h).status_code==400
+ assert director.post(path,json={**event,'endDate':'2027-02-26'},headers=h).status_code==400
+ assert director.post(path,json={**event,'endDate':'2027-02-29'},headers=h).status_code==400
+ assert director.post(path,json=event,headers=h).status_code==200
+ assert director.post(path,json={'name':'Prueba de un día','date':'2027-03-05'},headers=h).status_code==200
+ events={row['name']:row for row in director.get(path).json['events']}
+ assert events[event['name']]['date']==event['date']
+ assert events[event['name']]['endDate']==event['endDate']
+ assert events['Prueba de un día']['endDate']==''
+
 def test_runner_cannot_read_other_profile(env):
  _,ids,login,_=env;c,h=login('runner')
  assert c.get('/api/profile/'+ids['runner2']).status_code==403
