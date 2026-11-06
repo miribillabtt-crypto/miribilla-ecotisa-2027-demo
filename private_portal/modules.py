@@ -4,6 +4,7 @@ from decimal import Decimal,InvalidOperation
 from flask import g,request,jsonify,abort,send_file
 from sqlalchemy import select
 from openpyxl import Workbook
+from bank_reconciliation import bank_lock, bank_fingerprint, validate_bank_link
 
 # field types: string, int, money (integer cents stored), list of IDs.
 SPECS={
@@ -38,11 +39,6 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if g.user.role!='runner':return True
   if kind in ('result','charge','license','sport'):return data.get('rider')==g.user.id
   if kind=='days':return data.get('person')==g.user.id
-  if kind=='bank' and out.get('matched'):
-   entry=g.db.get(Record,out['matched'])
-   if not entry or entry.kind!='module:entry':abort(400,'Apunte CONTA no encontrado')
-   linked=unseal(entry.data)
-   if linked['amount']!=out['amount'] or linked['direction']!=out['direction']:abort(400,'El importe y el sentido del movimiento deben coincidir')
   if kind=='post':return data.get('status')=='Aprobada' and g.user.id in data.get('riders',[])
   if kind=='travel':
    event=g.db.get(Record,data.get('event',''))
@@ -253,6 +249,9 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @require()
  def create_record(kind):
   allowed(kind,True);data=validate(kind,body())
+  if kind=='bank':
+   bank_lock()
+   validate_bank_link(Record,unseal,data)
   if kind=='travel':
    lock_travel()
    if any(unseal(r.data)['event']==data['event'] for r in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
@@ -262,12 +261,15 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @app.post('/api/modules/<kind>/<record_id>')
  @require()
  def edit_record(kind,record_id):
-  allowed(kind,True);r=g.db.get(Record,record_id)
+  allowed(kind,True)
+  if kind=='bank':bank_lock()
+  r=g.db.get(Record,record_id)
   if not r or r.kind!='module:'+kind:abort(404)
   payload=body()
   previous=unseal(r.data) if kind=='entry' else None
   if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
   data=validate(kind,payload,previous)
+  if kind=='bank':validate_bank_link(Record,unseal,data,record_id)
   if kind=='travel':
    lock_travel()
    if any(x.id!=r.id and unseal(x.data)['event']==data['event'] for x in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
@@ -276,7 +278,9 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @app.post('/api/modules/<kind>/<record_id>/archive')
  @require('director')
  def archive_record(kind,record_id):
-  allowed(kind,True);r=g.db.get(Record,record_id)
+  allowed(kind,True)
+  if kind=='bank':bank_lock()
+  r=g.db.get(Record,record_id)
   if not r or r.kind!='module:'+kind:abort(404)
   r.kind='archived:'+kind;audit('module_archived:'+kind,r.id);return jsonify(ok=True)
  @app.post('/api/bank/import')
@@ -285,13 +289,16 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   batch=body().get('rows')
   if not isinstance(batch,list) or not 1<=len(batch)<=2000:abort(400,'Archivo vacío o más de 2000 movimientos')
   validated=[validate('bank',r) for r in batch]
-  import json
-  existing={json.dumps(unseal(r.data),sort_keys=True) for r in rows('bank')}
+  bank_lock()
+  existing={bank_fingerprint(unseal(r.data)) for r in g.db.scalars(
+   select(Record).where(Record.kind.in_(['module:bank','archived:bank'])))}
   inserted=0
   for data in validated:
-   fingerprint=json.dumps(data,sort_keys=True)
+   data['matched']=''
+   fingerprint=bank_fingerprint(data)
    if fingerprint in existing:continue
-   existing.add(fingerprint);g.db.add(Record(kind='module:bank',owner_id=g.user.id,data=seal(data)));inserted+=1
+   existing.add(fingerprint)
+   g.db.add(Record(kind='module:bank',owner_id=g.user.id,data=seal(data)));inserted+=1
   audit('bank_imported',str(inserted));return jsonify(imported=inserted,duplicates=len(batch)-inserted)
  @app.get('/api/people')
  @require('director','technician')
@@ -304,6 +311,9 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def restore(record_id):
   r=g.db.get(Record,record_id)
   if not r or not r.kind.startswith('archived:'):abort(404)
+  if r.kind=='archived:bank':
+   bank_lock()
+   validate_bank_link(Record,unseal,unseal(r.data),r.id)
   if r.kind=='archived:travel':
    lock_travel()
    data=unseal(r.data)

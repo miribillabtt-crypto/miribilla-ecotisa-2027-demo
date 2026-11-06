@@ -639,3 +639,38 @@ def test_invoice_presentation_exports_match_expenses_and_attachments(env,tmp_pat
  assert response.headers['Cache-Control']=='no-store'
  assert len(PdfReader(io.BytesIO(response.data)).pages)==2
  (tmp_path/'facturas-prueba.pdf').write_bytes(response.data)
+
+
+def test_bank_xlsx_preview_and_expense_reconciliation(env):
+ from openpyxl import Workbook
+ _,_,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ book=Workbook()
+ sheet=book.active
+ sheet.append(['Extracto de prueba'])
+ sheet.append(['Fecha operación','Descripción','Debe','Haber','Referencia'])
+ sheet.append(['02/03/2027','Hotel','77,43',None,'HOTEL-1'])
+ sheet.append(['03/03/2027','Gasolina','40,00',None,'GAS-1'])
+ sheet.append(['04/03/2027','Ingreso',None,'100,00','IN-1'])
+ file=io.BytesIO()
+ book.save(file)
+ preview=director.post('/api/bank/preview',data={'file':(io.BytesIO(file.getvalue()),'extracto.xlsx')},headers=h)
+ assert preview.status_code==200,preview.json
+ rows=preview.json['rows']
+ assert [(row['amount'],row['direction']) for row in rows]==[(7743,'Gasto'),(4000,'Gasto'),(10000,'Ingreso')]
+ assert director.post('/api/bank/import',json={'rows':rows},headers=h).json['imported']==3
+ expense=director.post('/api/modules/entry',json={'direction':'Gasto','amount':7743,'counterparty':'Hotel'},headers=h).json['id']
+ scan=io.BytesIO()
+ Image.new('RGB',(20,20),'white').save(scan,format='PNG')
+ assert director.post('/api/invoices/'+expense,data={'file':(io.BytesIO(scan.getvalue()),'factura.png')},headers=h).status_code==200
+ endpoint='/api/bank/reconciliation'
+ assert runner.get(endpoint).status_code==403
+ movements={row['reference']:row for row in director.get(endpoint).json['movements']}
+ assert set(movements)=={'HOTEL-1','GAS-1'}
+ assert movements['HOTEL-1']['state']=='Coincidencia única'
+ assert movements['GAS-1']['state']=='Sin factura'
+ assert director.post(endpoint+'/'+movements['GAS-1']['id'],json={'invoice':expense},headers=h).status_code==400
+ assert director.post(endpoint+'/'+movements['HOTEL-1']['id'],json={'invoice':expense},headers=h).status_code==200
+ assert director.post('/api/bank/import',json={'rows':rows},headers=h).json['imported']==0
+ assert any(row['state']=='Conciliado' for row in director.get(endpoint).json['movements'])
