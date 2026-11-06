@@ -43,6 +43,32 @@ def test_direction_creates_events_with_optional_end_date(env):
  assert events[event['name']]['endDate']==event['endDate']
  assert events['Prueba de un día']['endDate']==''
 
+def test_direction_provisions_linked_technician_accounts(env):
+ app,_,login,_=env
+ director,h=login('director_limited')
+ technician,th=login('technician')
+ path='/api/staff/accounts'
+ assert technician.post(path,json={'name':'Otro Técnico'},headers=th).status_code==403
+ assert director.post(path,json={'name':' '},headers=h).status_code==400
+ existing=director.post('/api/modules/staff',json={'name':'Técnica Existente','function':'Mecánica'},headers=h).json['id']
+ new=director.post(path,json={'name':'Álvaro de Prueba'},headers=h)
+ assert new.status_code==200,new.json
+ account=new.json['accounts'][0]
+ assert account['username']=='alvaro.de.prueba'
+ assert director.post(path,json={'name':'alvaro de prueba'},headers=h).status_code==409
+ pending=director.post(path,json={},headers=h).json
+ assert [a['username'] for a in pending['accounts']]==['tecnica.existente']
+ assert director.post(path,json={},headers=h).json['accounts']==[]
+ staff={row['name']:row for row in director.get('/api/modules/staff').json['records']}
+ assert staff['Técnica Existente']['id']==existing and staff['Técnica Existente']['function']=='Mecánica'
+ for access in [account,*pending['accounts']]:
+  client=app.test_client()
+  assert client.post('/api/login',json={'email':access['username'],'password':access['password']}).status_code==200
+  user=client.get('/api/me').json['user']
+  assert user['id']==staff[access['name']]['user']
+  assert user['role']=='technician' and not user['owner'] and not user['documents']
+  assert client.get('/api/users').status_code==403
+
 def test_runner_cannot_read_other_profile(env):
  _,ids,login,_=env;c,h=login('runner')
  assert c.get('/api/profile/'+ids['runner2']).status_code==403

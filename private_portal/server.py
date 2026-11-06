@@ -13,6 +13,15 @@ from PIL import Image
 from roster_import import normalize
 
 Base=declarative_base()
+STAFF_PASSWORD_WORDS=(
+    'Abeto','Agua','Aire','Arena','Arroyo','Azul','Bahia','Barco','Bosque','Brisa',
+    'Cacao','Cala','Campo','Canto','Cedro','Cielo','Cima','Claro','Costa','Duna',
+    'Eco','Faro','Flor','Fuente','Giro','Haya','Isla','Jara','Junco','Lago',
+    'Lima','Lirio','Llano','Loma','Luna','Mar','Menta','Mirlo','Monte','Nube',
+    'Ola','Olmo','Paseo','Pico','Pino','Playa','Prado','Puente','Rama','Rayo',
+    'Rema','Ria','Rio','Roble','Roca','Rosa','Ruta','Senda','Sol','Sur',
+    'Tramo','Trigo','Valle','Vela',
+)
 def uid(): return secrets.token_hex(16)
 def digest(v): return hashlib.sha256(v.encode()).hexdigest()
 class User(Base):
@@ -285,6 +294,53 @@ def create_app(test_config=None):
     @app.get('/api/users')
     @require('director')
     def users():return jsonify(users=[{'id':u.id,'name':u.name,'email':u.email,'role':u.role,'active':u.active,'documents':u.documents,'owner':u.owner,'accountReady':bool(u.password)} for u in g.db.scalars(select(User).order_by(User.name))])
+    @app.post('/api/staff/accounts')
+    @require('director')
+    def create_staff_accounts():
+        import re
+        from rider_accounts import alias_key
+
+        d=body()
+        if g.db.get_bind().dialect.name=='postgresql':
+            g.db.execute(sql_text('SELECT pg_advisory_xact_lock(20273004)'))
+        staff=g.db.scalars(select(Record).where(Record.kind=='module:staff').order_by(Record.id).with_for_update()).all()
+        technician_names={normalize(name) for name in g.db.scalars(select(User.name).where(User.role=='technician'))}
+        if 'name' in d:
+            name=' '.join(text(d,'name',150).split())
+            if not name:abort(400,'Introduce el nombre y los apellidos')
+            key=normalize(name)
+            if key in technician_names or any(normalize(unseal(record.data)['name'])==key for record in staff):
+                abort(409,'Ya existe un técnico con ese nombre. Revisa su ficha en Personal técnico.')
+            record=Record(id=uid(),kind='module:staff',owner_id=g.user.id,data=seal(dict(name=name)))
+            g.db.add(record)
+            staff=[record]
+        usernames=set(g.db.scalars(select(User.email).where(User.email.is_not(None))))
+        accounts=[]; skipped=[]
+        for record in staff:
+            data=unseal(record.data)
+            name=data['name']
+            if data.get('user') or normalize(name) in technician_names:
+                skipped.append(name)
+                continue
+            base='.'.join(re.findall(r'[a-z0-9]+',normalize(name).lower()))[:80].rstrip('.') or 'tecnico'
+            username=base
+            suffix=2
+            while username in usernames or g.db.get(Record,alias_key(username)):
+                username=f'{base}.{suffix}'
+                suffix+=1
+            words=[secrets.choice(STAFF_PASSWORD_WORDS) for _ in range(3)]
+            password='-'.join([*words,f'{secrets.randbelow(100000):05}'])
+            user=User(id=uid(),email=username,name=name,role='technician',profile=seal({}),
+                      password=generate_password_hash(password,method='scrypt:32768:8:1'))
+            g.db.add(user)
+            data['user']=user.id
+            record.data=seal(data)
+            usernames.add(username)
+            technician_names.add(normalize(name))
+            audit('technician_account_created',user.id)
+            accounts.append(dict(name=name,username=username,password=password))
+        return jsonify(accounts=sorted(accounts,key=lambda account:normalize(account['name'])),skipped=sorted(skipped))
+
     @app.post('/api/invites')
     @require('director')
     def invite():

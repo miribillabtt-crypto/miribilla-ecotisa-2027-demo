@@ -295,6 +295,14 @@ async function resourceMatrix(c,section){
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
  c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
+  ${section==='staff'&&me.role==='director'?`<details class="card"><summary>Dar de alta técnico</summary>
+   <form id="createTechnician"><label>Nombre y apellidos<input name="name" maxlength="150" required></label>
+    <button class="primary" type="submit">Guardar técnico y crear acceso</button></form>
+   <p>Para las fichas que ya existen, genera los accesos pendientes con un solo botón.</p>
+   <button type="button" id="createPendingTechnicians">Generar accesos pendientes</button>
+   <p id="technicianAccountStatus" role="status"></p>
+   <div id="technicianCredentials" hidden></div>
+  </details>`:''}
   <div class="toolbar"><label>Buscar actividad<input type="search" id="resourceSearch" placeholder="Carrera, lugar…"></label>
    <label>Mes<input type="month" id="resourceMonth"></label><button type="button" id="resourceClear">Ver todo</button></div>
   <div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado / Reservado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>
@@ -302,6 +310,40 @@ async function resourceMatrix(c,section){
   <div id="resourceTables"></div>`;
  const host=c.querySelector('#resourceTables');
  const search=c.querySelector('#resourceSearch'),month=c.querySelector('#resourceMonth');
+ const newAccounts=c.querySelector('#createPendingTechnicians');
+ if(newAccounts){
+  const issued=[];
+  const createAccounts=async data=>{
+   const {accounts,skipped}=await api('/staff/accounts','POST',data);
+   const results=c.querySelector('#technicianCredentials');
+   if(!results)return;
+   c.querySelector('#technicianAccountStatus').textContent=accounts.length?
+    (accounts.length===1?'Se ha creado un acceso.':`Se han creado ${accounts.length} accesos.`):
+    'No hay accesos pendientes. Revisa las fichas y los usuarios vinculados.';
+   if(!accounts.length)return;
+   issued.push(...accounts);
+   results.hidden=false;
+   results.innerHTML=`<p>Copia cada usuario y contraseña antes de salir de esta pantalla.</p>
+    ${issued.map(({name,username,password})=>`<div class="row"><strong>${esc(name)}</strong>
+      <label>Usuario y contraseña<textarea rows="2" readonly spellcheck="false">${esc(username)}&#10;${esc(password)}</textarea></label>
+      <button type="button" data-copy-technician>Copiar acceso</button></div>`).join('')}`;
+   results.querySelectorAll('[data-copy-technician]').forEach(button=>button.onclick=async()=>{
+    const input=button.parentElement.querySelector('textarea');
+    try{await navigator.clipboard.writeText(input.value);button.textContent='Copiado';}
+    catch{input.focus();input.select();}
+   });
+   if(skipped.length)c.querySelector('#technicianAccountStatus').textContent+=` ${skipped.length} fichas ya tenían un acceso o una cuenta con ese nombre.`;
+   resources.staff=(await api('/modules/staff')).records;
+   if(host.isConnected)render();
+  };
+  bindForm('createTechnician',async(form,data)=>{await createAccounts(data);form.reset();});
+  newAccounts.onclick=async()=>{
+   newAccounts.disabled=true;
+   try{message('');await createAccounts({});}
+   catch(error){message(error.message);}
+   finally{newAccounts.disabled=false;}
+  };
+ }
  const render=()=>{
   const query=search.value.toLocaleLowerCase('es').trim();
   const filtered=events.filter(event=>(event.name+' '+(event.place||'')).toLocaleLowerCase('es').includes(query)&&
