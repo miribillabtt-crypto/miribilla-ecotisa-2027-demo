@@ -14,6 +14,13 @@
 .event-call{margin-top:16px}
 .event-call summary,.card>summary{cursor:pointer;font-weight:600}
 .event-notes{white-space:pre-wrap}
+.direction-actions{margin:16px 0 26px}
+.direction-actions .tile strong{display:block;font-size:18px;margin-bottom:4px}
+.direction-actions .tile:hover{border-color:#7998b1;background:#f7fafc}
+.section-navigation{margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid #d5dfe7}
+.section-navigation>strong{display:block;color:#465e72;margin-bottom:8px}
+.section-links{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.activity-sections{margin:14px 0}
 
 #mobileMenu,.mobile-actions,.mobile-agenda{display:none}
 @media(max-width:800px){

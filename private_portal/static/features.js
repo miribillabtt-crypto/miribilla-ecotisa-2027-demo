@@ -16,7 +16,20 @@ const moduleSpecs={
 const featureViews={shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:c=>modulePage(c,'sport'),results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
 const euros=n=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format((Number(n)||0)/100);
 let moduleContext={};
-async function dashboardPage(c){if(me.role!=='director'){c.innerHTML='<h1>Mi equipo</h1><p>Utiliza el menú para consultar tus actividades y tu ficha.</p>';return;}const s=await api('/summary');c.innerHTML=`<h1>Panel de Dirección</h1><div class="metricgrid">${[[s.riders,'Corredores activos'],[s.events,'Actividades'],[s.staff,'Técnicos'],[s.vehicles,'Vehículos'],[euros(s.income),'Ingresos registrados'],[euros(s.expenses),'Gastos registrados']].map(([v,label])=>`<div class="card"><small>${label}</small><strong class="metric">${v}</strong></div>`).join('')}</div><div class="grid">${[['calendar','Carreras y calendario','Crear actividades y recoger disponibilidad'],['calls','Convocatorias','Seleccionar disponibles y publicar'],['planning','Viajes y hoteles','Inscripción, salidas, personal y habitaciones'],['resources','Técnicos y vehículos','Dar de alta y asignar recursos'],['licenses','Licencias y plantilla','Estado de cada corredor'],['conta','CONTA','Facturas, presupuesto, banco y cobros'],['publications','Comunicación','Diseños colectivos e individuales'],['users','Usuarios','Crear invitaciones y gestionar permisos']].map(([id,title,desc])=>`<button class="tile" data-shortcut="${id}"><strong>${title}</strong><small>${desc}</small></button>`).join('')}</div>`;c.querySelectorAll('[data-shortcut]').forEach(b=>b.onclick=()=>navigate(b.dataset.shortcut));}
+async function dashboardPage(c){
+ if(me.role!=='director'){c.innerHTML='<h1>Mi equipo</h1><p>Utiliza el menú para consultar tus actividades y tu ficha.</p>';return;}
+ const s=await api('/summary');
+ const actions=[
+  ['calendar','Calendario','Carreras, convocatorias, viajes y gastos por actividad'],
+  ['roster','Equipo','Corredores, fichas, licencias y ropa'],
+  ['resources','Técnicos y vehículos','Disponibilidad, fichas y accesos técnicos'],
+  ['conta','Contabilidad','Facturas, cobros por corredor y conciliación'],
+ ];
+ c.innerHTML=`<h1>Panel de Dirección</h1>
+  <div class="grid direction-actions">${actions.map(([id,title,desc])=>`<button type="button" class="tile" data-shortcut="${id}"><strong>${title}</strong><small>${desc}</small></button>`).join('')}</div>
+  <h2>Resumen del equipo</h2><div class="metricgrid">${[[s.riders,'Corredores activos'],[s.events,'Actividades'],[s.staff,'Técnicos'],[s.vehicles,'Vehículos'],[euros(s.income),'Ingresos registrados'],[euros(s.expenses),'Gastos registrados']].map(([v,label])=>`<div class="card"><small>${label}</small><strong class="metric">${v}</strong></div>`).join('')}</div>`;
+ c.querySelectorAll('[data-shortcut]').forEach(b=>b.onclick=()=>navigate(b.dataset.shortcut));
+}
 async function getContext(kind){const [events,riders]=await Promise.all([api('/events'),api('/roster')]);const ctx={events:events.events,riders:riders.riders,people:[],staff:[],vehicle:[],entry:[],budget:[]};if(['director','technician'].includes(me.role))ctx.people=(await api('/people')).people;if(kind==='travel'){if(me.role!=='runner'){ctx.staff=(await api('/modules/staff')).records;ctx.vehicle=(await api('/modules/vehicle')).records;}}if(kind==='entry')ctx.budget=(await api('/modules/budget')).records;if(kind==='bank')ctx.entry=(await api('/modules/entry')).records;return ctx;}
 function fieldOptions(type,ctx){const optional=String(type).endsWith('?');let values=[];if(type.startsWith('event'))values=ctx.events.map(x=>[x.id,x.name]);else if(type.startsWith('runner'))values=ctx.riders.map(x=>[x.id,x.name]);else if(type.startsWith('person'))values=ctx.people.map(x=>[x.id,x.name+' · '+roles[x.role]]);else if(type==='entry?')values=ctx.entry.map(x=>[x.id,x.concept+' · '+euros(x.amount)]);else values=(ctx[type]||[]).map(x=>[x.id,x.name]);return optional?[['','Sin asignar'],...values]:values;}
 function moduleInput([key,label,type='text'],data,ctx){let v=data[key]??'';if(type==='budget?'){
@@ -30,7 +43,7 @@ const [ctx,d]=await Promise.all([getContext(kind),api('/modules/'+kind+(event?'?
 if(event)ctx.fixedEvent=event;
 const redraw=(id=null)=>modulePage(c,kind,id,event);
 const issuedStaff=new Map();
-moduleContext=ctx;const spec=moduleSpecs[kind];let rows=d.records;if(kind==='license')rows.sort((a,b)=>(ctx.riders.find(r=>r.id===a.rider)?.name||'').localeCompare(ctx.riders.find(r=>r.id===b.rider)?.name||'','es'));const canEdit=me.role==='director';if(me.role==='communication'&&kind!=='post')throw Error('Sin permiso');const edit=editing?rows.find(x=>x.id===editing)||{}:kind==='entry'?{event:event?.id||'',direction:'Gasto',status:'Pendiente',category:'Otros'}:{};let subnav='';if(me.role==='director'&&!event&&['entry','budget','bank','charge'].includes(kind))subnav=`<div class="toolbar">${[['conta','Ingresos y gastos'],['budgets','Presupuesto'],['bank','Banco'],['charges','Cobros por corredor']].map(([id,label])=>`<button data-finance="${id}">${label}</button>`).join('')}</div>`;
+moduleContext=ctx;const spec=moduleSpecs[kind];let rows=d.records;if(kind==='license')rows.sort((a,b)=>(ctx.riders.find(r=>r.id===a.rider)?.name||'').localeCompare(ctx.riders.find(r=>r.id===b.rider)?.name||'','es'));const canEdit=me.role==='director';if(me.role==='communication'&&kind!=='post')throw Error('Sin permiso');const edit=editing?rows.find(x=>x.id===editing)||{}:kind==='entry'?{event:event?.id||'',direction:'Gasto',status:'Pendiente',category:'Otros'}:{};
 let totals='';if(kind==='days'){const total=rows.reduce((sum,r)=>sum+r.days,0);totals='<div class="note">Total de días registrados: <b>'+total+'</b></div>';}if(event){
   const subtotals=new Map();
   for(const row of rows){
@@ -53,7 +66,7 @@ const fields=kind==='entry'?`<p>Solo necesitas indicar el importe. Puedes guarda
  <div class="grid">${spec.filter(([key])=>primaryEntryFields.includes(key)).map(renderField).join('')}</div>
  <details class="card"><summary>Más datos opcionales</summary><div class="grid">${spec.filter(([key])=>!primaryEntryFields.includes(key)).map(renderField).join('')}</div></details>`:
  `<div class="grid">${spec.map(renderField).join('')}</div>`;
-c.innerHTML=`${event?'<h2>Facturas y gastos de la actividad</h2>':`<h1>${kind==='charge'&&me.role==='runner'?'Mi cuenta · gastos y recibos':moduleLabels[kind]}</h1>`}${subnav}${totals}<div class="toolbar">${event?'':`<a class="button" href="/api/modules/${kind}/export">Descargar Excel</a>`}${event?'<button id="openNew" type="button">+ Añadir factura o gasto</button>':canEdit?'<button id="openNew">+ Añadir registro</button>':''}</div>${kind==='charge'?'<p>Liquidaciones de desplazamientos y compras de la tienda. Los importes pendientes son deudas registradas.</p>':''}${kind==='bank'&&canEdit?'<div class="card"><h2>Importar extracto bancario</h2><small>Excel .xlsx o CSV. El Excel admite Fecha e Importe, o Fecha y Debe/Haber. Revisa los cargos y abonos antes de importar.</small><input type="file" id="bankcsv" accept=".csv,.xlsx"><div id="bankpreview"></div></div><section class="card" id="bankReconciliation"></section>':''}<div id="moduleEditor" ${editing?'':'hidden'}>${canEdit?`<form method="post" id="moduleForm" class="card"><h2>${editing?'Editar':'Nuevo registro'}</h2>${fields}<button class="primary" type="submit">Guardar</button> <button type="button" id="cancelEdit">Cancelar</button></form>`:''}</div><div class="toolbar"><label>Buscar<input id="moduleSearch" placeholder="Nombre, carrera, concepto…"></label>${kind==='license'?'<label>Estado<select id="licenseStatus"><option>Todos</option><option>No aportada</option><option>Pendiente de revisión</option><option>Verificada</option><option>Caducada</option></select></label>':''}</div><div id="moduleRows"></div>${event?`<details class="card"><summary>Repartir gastos entre los convocados</summary>
+c.innerHTML=`${event?'<h2>Facturas y gastos de la actividad</h2>':`<h1>${kind==='charge'&&me.role==='runner'?'Mi cuenta · gastos y recibos':moduleLabels[kind]}</h1>`}${totals}<div class="toolbar">${event?'':`<a class="button" href="/api/modules/${kind}/export">Descargar Excel</a>`}${event?'<button id="openNew" type="button">+ Añadir factura o gasto</button>':canEdit?'<button id="openNew">+ Añadir registro</button>':''}</div>${kind==='charge'?'<p>Liquidaciones de desplazamientos y compras de la tienda. Los importes pendientes son deudas registradas.</p>':''}${kind==='bank'&&canEdit?'<div class="card"><h2>Importar extracto bancario</h2><small>Excel .xlsx o CSV. El Excel admite Fecha e Importe, o Fecha y Debe/Haber. Revisa los cargos y abonos antes de importar.</small><input type="file" id="bankcsv" accept=".csv,.xlsx"><div id="bankpreview"></div></div><section class="card" id="bankReconciliation"></section>':''}<div id="moduleEditor" ${editing?'':'hidden'}>${canEdit?`<form method="post" id="moduleForm" class="card"><h2>${editing?'Editar':'Nuevo registro'}</h2>${fields}<button class="primary" type="submit">Guardar</button> <button type="button" id="cancelEdit">Cancelar</button></form>`:''}</div><div class="toolbar"><label>Buscar<input id="moduleSearch" placeholder="Nombre, carrera, concepto…"></label>${kind==='license'?'<label>Estado<select id="licenseStatus"><option>Todos</option><option>No aportada</option><option>Pendiente de revisión</option><option>Verificada</option><option>Caducada</option></select></label>':''}</div><div id="moduleRows"></div>${event?`<details class="card"><summary>Repartir gastos entre los convocados</summary>
  <form id="splitExpenses"><p>Marca solo los gastos que se cobran a los corredores. Se dividen a partes iguales entre los convocados de la convocatoria publicada.</p>
  ${rows.filter(row=>row.amount>0&&row.status!=='Anulado').map(row=>`<label class="checkline"><input type="checkbox" name="expense" value="${esc(row.id)}" ${row.splitRecorded?'disabled':''}>${esc(row.concept||row.counterparty||row.category||'Gasto')} · ${euros(row.amount)}${row.splitRecorded?' · Ya repartido':''}</label>`).join('')}
  <button type="submit">Registrar cobros por corredor</button></form></details>`:''}`;
@@ -71,7 +84,7 @@ if(kind==='entry'&&canEdit){
   </form><small>Deja las fechas vacías para incluir todos los gastos.</small>`;
  c.querySelector('.toolbar').after(exports);
 }
-const eventForExpense=row=>ctx.events.find(activity=>activity.id===row.event);
+const eventForExpense=row=>event?.id===row.event?event:ctx.events.find(activity=>activity.id===row.event);
 const canSplit=row=>row.event&&row.direction==='Gasto'&&row.amount>0&&row.status!=='Anulado';
 async function splitExpenses(activity,selected){
  if(activity?.callStatus!=='Publicada')throw Error('Publica la convocatoria antes de repartir los gastos.');
@@ -95,7 +108,7 @@ async function splitExpenses(activity,selected){
 if(event)bindForm('splitExpenses',async form=>{
  const expenses=new Set(new FormData(form).getAll('expense'));
  if(!expenses.size)throw Error('Selecciona los gastos que quieres repartir.');
- await splitExpenses(ctx.events.find(activity=>activity.id===event.id),rows.filter(row=>expenses.has(row.id)));
+ await splitExpenses(event,rows.filter(row=>expenses.has(row.id)));
 });
 function expenseSplitCell(row){
  if(kind!=='entry')return '';
@@ -130,7 +143,7 @@ c.querySelectorAll('[data-edit]').forEach(b=>{
  b.onclick=()=>redraw(b.dataset.edit).catch(e=>message(e.message));
  if(kind==='staff')bindStaffPassword(b,rows.find(row=>row.id===b.dataset.edit),issuedStaff);
 });c.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Archivar este registro? Se puede restaurar desde Archivados.'))return;try{await api('/modules/'+kind+'/'+b.dataset.archive+'/archive','POST',{});await redraw();}catch(e){message(e.message);}});}
-table();document.getElementById('moduleSearch').oninput=table;if(document.getElementById('licenseStatus'))document.getElementById('licenseStatus').onchange=table;c.querySelectorAll('[data-finance]').forEach(b=>b.onclick=()=>navigate(b.dataset.finance));if(canEdit){document.getElementById('openNew').onclick=async()=>{
+table();if(event)c.refreshActivitySection=table;document.getElementById('moduleSearch').oninput=table;if(document.getElementById('licenseStatus'))document.getElementById('licenseStatus').onchange=table;if(canEdit){document.getElementById('openNew').onclick=async()=>{
  if(event&&editing){try{await redraw();}catch(err){message(err.message);return;}}
  document.getElementById('moduleEditor').hidden=false;
 };document.getElementById('cancelEdit').onclick=()=>redraw().catch(e=>message(e.message));bindForm('moduleForm',async(f,data)=>{if(f.dataset.ocrReview==='true'&&!f.elements.ocrReviewed?.checked)throw Error('Revisa los datos detectados y marca la confirmación antes de guardar.');const out={};for(const [key,,type] of spec){if(type==='money'){const v=Number(data[key]);if(!Number.isFinite(v)||v<0)throw Error('Importe no válido');out[key]=Math.round(v*100);}else if(type==='integer')out[key]=Number(data[key]);else if(String(type).endsWith('[]'))out[key]=new FormData(f).getAll(key);else out[key]=data[key]||'';}if(event){out.event=event.id;out.direction='Gasto';}
@@ -224,32 +237,15 @@ async function eventTravelPanel(panel,event){
   const travel=travels.records.find(item=>item.event===event.id)||{};
   const ctx={staff:staff.records,vehicle:vehicles.records};
   const spec=moduleSpecs.travel.filter(([key])=>key!=='event');
-  let published=event.callStatus==='Publicada';
-  const hotelLink=()=>me.documents?(published?`<a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel">Descargar listado del hotel con DNI</a> <a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel/identity-pdf">Descargar PDF privado de DNI</a>`:'<small>Publica la convocatoria para descargar los DNI del hotel.</small>'):'';
-  panel.innerHTML=`<h2>Ficha del viaje</h2>
-    <div class="toolbar">
-      <span class="pill" id="travelCallStatus">Convocatoria: ${published?'Publicada':'Borrador'}</span>
-      <button type="button" id="travelPublish">${published?'Volver a borrador':'Publicar convocatoria'}</button>
-      <div id="travelHotelDownload">${hotelLink()}</div>
-    </div>
+  const hotelLink=()=>me.documents?(event.callStatus==='Publicada'?`<a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel">Descargar listado del hotel con DNI</a> <a class="button" href="/api/events/${encodeURIComponent(event.id)}/hotel/identity-pdf">Descargar PDF privado de DNI</a>`:'<small>Publica la convocatoria para descargar los DNI del hotel.</small>'):'';
+  panel.innerHTML=`<h2>Viaje, hotel e inscripciones</h2>
+    <div class="toolbar" id="travelHotelDownload">${hotelLink()}</div>
     <form method="post" id="eventTravel">
       <div class="grid">${spec.map(field=>moduleInput(field,travel,ctx)).join('')}</div>
       <button type="submit" class="primary">Guardar ficha del viaje</button>
     </form>${me.documents?'<details class="card" id="hotelGuests"></details>':''}`;
+  panel.refreshActivitySection=()=>{panel.querySelector('#travelHotelDownload').innerHTML=hotelLink();};
   const guests=panel.querySelector('#hotelGuests');
-  document.getElementById('travelPublish').onclick=async e=>{
-    const button=e.currentTarget;
-    button.disabled=true;
-    try{
-      await api('/events/'+event.id+'/details','POST',{callStatus:published?'Borrador':'Publicada'});
-      published=!published;
-      panel.querySelector('#travelCallStatus').textContent='Convocatoria: '+(published?'Publicada':'Borrador');
-      panel.querySelector('#travelHotelDownload').innerHTML=hotelLink();
-      button.textContent=published?'Volver a borrador':'Publicar convocatoria';
-      message(published?'Convocatoria publicada.':'Convocatoria en borrador.');
-    }catch(err){message(err.message);}
-    finally{button.disabled=false;}
-  };
   bindForm('eventTravel',async (form,data)=>{
     const formData=new FormData(form);
     const out={event:event.id};
@@ -341,18 +337,23 @@ async function shopPage(c){
  });
 }
 async function resourcesPage(c){
- c.innerHTML='<h1>Técnicos y vehículos</h1><div class="toolbar"><button type="button" id="availabilityTab">Disponibilidad y convocatorias</button><button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button></div><div id="resourcescontent"></div>';
+ const director=me.role==='director';
+ c.innerHTML=`<h1>Técnicos y vehículos</h1><div class="toolbar">
+  ${director?'':'<button type="button" id="availabilityTab">Disponibilidad y convocatorias</button>'}
+  <button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button>
+ </div><div id="resourcescontent"></div>`;
  const content=c.querySelector('#resourcescontent');
+ const availability=c.querySelector('#availabilityTab');
  const show=async kind=>{
-  c.querySelector('#availabilityTab').classList.toggle('active',kind==='all');
+  availability?.classList.toggle('active',kind==='all');
   c.querySelector('#stafftab').classList.toggle('active',kind==='staff');
   c.querySelector('#vehicletab').classList.toggle('active',kind==='vehicles');
   await resourceMatrix(content,kind);
  };
- c.querySelector('#availabilityTab').onclick=()=>show('all').catch(err=>message(err.message));
+ if(availability)availability.onclick=()=>show('all').catch(err=>message(err.message));
  c.querySelector('#stafftab').onclick=()=>show('staff').catch(err=>message(err.message));
  c.querySelector('#vehicletab').onclick=()=>show('vehicles').catch(err=>message(err.message));
- await show('all');
+ await show(director?'staff':'all');
 }
 
 async function resourceMatrix(c,section){
@@ -460,7 +461,21 @@ async function resourceMatrix(c,section){
  c.querySelector('#resourceClear').onclick=()=>{search.value='';month.value='';render();};
  render();
 }
-async function callsPage(c){const [events,riders]=await Promise.all([api('/events'),api('/roster')]);let list=sortActivities(events.events);if(me.role==='runner')list=list.filter(x=>x.called.includes(me.id)&&x.callStatus==='Publicada');c.innerHTML=`<h1>${me.role==='runner'?'Mis convocatorias':'Convocatorias'}</h1>${me.role==='director'?'<p>Primero recoge disponibilidad en el calendario. Guarda la selección y publica la convocatoria aquí.</p>':''}<label>Buscar prueba o actividad<input id="callsSearch" type="search" placeholder="Ej. Guadiana"></label><div id="callsResults">`+list.map(ev=>`<div class="card" data-activity-search="${esc(ev.name)}"><h2>${esc(ev.name)}</h2><p>${esc(activityDateLabel(ev))} · ${esc(ev.place||'Lugar por confirmar')}</p><span class="pill">${esc(ev.callStatus||'Borrador')}</span><h3>Corredores seleccionados</h3><ul>${ev.called.map(id=>'<li>'+esc(riders.riders.find(r=>r.id===id)?.name||'Corredor')+'</li>').join('')||'<li>Sin corredores seleccionados.</li>'}</ul>${me.role==='director'?`<button data-open-call-event="${esc(ev.id)}">Abrir ficha y convocar</button> <button data-call-publish="${ev.id}" data-status="${ev.callStatus==='Publicada'?'Borrador':'Publicada'}">${ev.callStatus==='Publicada'?'Volver a borrador':'Publicar convocatoria'}</button>`:''}${me.role!=='director'?`<button data-planning="${ev.id}">Planning de viaje</button>`:''}${me.role==='director'?`<a class="button" href="/api/events/${ev.id}/package">Descargar convocatoria y paquete hotel</a>`:''}</div>`).join('')+'<p data-no-activities hidden>No hay convocatorias que coincidan.</p></div>';bindActivitySearch(document.getElementById('callsSearch'),document.getElementById('callsResults'));c.querySelectorAll('[data-open-call-event]').forEach(button=>button.onclick=()=>{page='calendar';const content=shell();calendarPage(content,button.dataset.openCallEvent).catch(err=>message(err.message));});c.querySelectorAll('[data-call-publish]').forEach(b=>b.onclick=async()=>{try{const e=events.events.find(x=>x.id===b.dataset.callPublish);if(b.dataset.status==='Publicada'&&!e.called.length)throw Error('Selecciona corredores antes de publicar.');await api('/events/'+e.id+'/details','POST',{callStatus:b.dataset.status});await callsPage(c);}catch(e){message(e.message);}});c.querySelectorAll('[data-planning]').forEach(b=>b.onclick=()=>navigate('planning'));}
+async function callsPage(c){
+ const [events,riders]=await Promise.all([api('/events'),api('/roster')]);
+ const runner=me.role==='runner';
+ const list=sortActivities(events.events).filter(event=>!runner||(event.called.includes(me.id)&&event.callStatus==='Publicada'));
+ c.innerHTML=`<h1>${runner?'Mis convocatorias':'Convocatorias'}</h1>
+  <label>Buscar actividad<input id="callsSearch" type="search" placeholder="Ej. Guadiana"></label>
+  <div id="callsResults">${list.map(event=>`<article class="card" data-search-name="${esc(event.name)}">
+   <h2>${esc(event.name)}</h2><p>${esc(activityDateLabel(event))} · ${esc(event.place||'Lugar por confirmar')}</p>
+   <span class="pill">${esc(event.callStatus||'Borrador')}</span><h3>Corredores seleccionados</h3>
+   <ul>${event.called.map(id=>`<li>${esc(riders.riders.find(rider=>rider.id===id)?.name||'Corredor')}</li>`).join('')||'<li>Sin corredores seleccionados.</li>'}</ul>
+   <button type="button" data-planning="${esc(event.id)}">Planning de viaje</button>
+  </article>`).join('')}<p data-no-matches hidden>No hay convocatorias que coincidan.</p></div>`;
+ bindNameSearch(c.querySelector('#callsSearch'),c.querySelector('#callsResults'));
+ c.querySelectorAll('[data-planning]').forEach(button=>button.onclick=()=>navigate('planning'));
+}
 async function archivePage(c){const d=await api('/archive');c.innerHTML='<h1>Registros archivados</h1><div class="card">'+(d.records.map(r=>`<div class="row"><span>${esc(moduleLabels[r.kind]||r.kind)} · ${esc(r.name||r.concept||r.hotel||r.number||r.date||r.id)}</span><button data-restore="${r.id}">Restaurar</button></div>`).join('')||'No hay registros archivados.')+'</div>';c.querySelectorAll('[data-restore]').forEach(b=>b.onclick=async()=>{try{await api('/archive/'+b.dataset.restore+'/restore','POST',{});await archivePage(c);}catch(e){message(e.message);}});}
 async function bankPanel(container){
  const {movements=[]}=await api('/bank/reconciliation');
@@ -525,4 +540,4 @@ function wrapped(text,x,y,width,font,lineHeight){ctx.font=font;const words=Strin
 let y=wrapped(p.title||event?.name||'Equipo',64,230,950,'600 62px sans-serif',74);ctx.font='400 30px sans-serif';y=wrapped(p.subtitle||event?.date||'Fecha por confirmar',64,y+10,950,'400 30px sans-serif',40)+20;const selected=p.riders.map(id=>people.find(x=>x.id===id)||{id,name:me.id===id?me.name:'Corredor',photos:[]});const cols=selected.length===1?1:selected.length<=4?2:selected.length>12?4:3;const gap=20,w=(950-gap*(cols-1))/cols;const rows=Math.ceil(selected.length/cols);const cardH=Math.min(selected.length===1?Math.min(650,h-y-120):300,Math.max(90,(h-y-110)/Math.max(rows,1)-20));for(let i=0;i<selected.length;i++){const rider=selected[i],x=64+(i%cols)*(w+gap),cy=y+Math.floor(i/cols)*(cardH+20);ctx.fillStyle=template===2||template===4?'#dce4eb':'#23445f';ctx.fillRect(x,cy,w,cardH);const img=await imageFor(rider);if(img){const photoH=Math.max(0,cardH-60);if(photoH){const scale=Math.max(w/img.width,photoH/img.height);ctx.save();ctx.beginPath();ctx.rect(x,cy,w,photoH);ctx.clip();ctx.drawImage(img,x+(w-img.width*scale)/2,cy+(photoH-img.height*scale)/2,img.width*scale,img.height*scale);ctx.restore();}img.close();}else{ctx.fillStyle=fg;ctx.font='600 60px sans-serif';ctx.fillText(rider.name.slice(0,1),x+24,cy+Math.min(80,cardH-10));}ctx.fillStyle=fg;ctx.font='500 25px sans-serif';let name=rider.name;while(ctx.measureText(name).width>w-24&&name.length>1)name=name.slice(0,-1);ctx.fillText(name,x+12,cy+cardH-20);}ctx.fillStyle=fg;ctx.font='400 24px sans-serif';ctx.fillText(event?.place||'Miribilla Cycling · Ecotisa',64,h-45);document.getElementById('downloadPost').disabled=false;document.getElementById('sharePost').disabled=false;document.getElementById('postHint').textContent=(p.status||'Vista previa')+' · '+p.format;}
 document.getElementById('downloadPost').onclick=()=>{const a=document.createElement('a');a.download='Miribilla_Ecotisa_'+(currentPost?.type||'publicacion')+'.png';a.href=document.getElementById('postCanvas').toDataURL('image/png');a.click();};document.getElementById('sharePost').onclick=()=>{document.getElementById('postCanvas').toBlob(async blob=>{try{const f=new File([blob],'Miribilla_Ecotisa.png',{type:'image/png'});if(navigator.canShare?.({files:[f]})){await navigator.share({files:[f],title:currentPost?.title||'Miribilla Ecotisa'});}else{document.getElementById('downloadPost').click();message('Imagen descargada. Puedes publicarla desde tu red social.');}}catch(e){if(e.name!=='AbortError')message(e.message);}},'image/png');};if(saved.length){currentPost=saved[saved.length-1];await drawPost(currentPost);}}
 function editEvent(c,event){c.innerHTML=`<h1>Editar actividad</h1><form method="post" id="eventDetails" class="card"><div class="grid">${[['name','Nombre'],['date','Fecha de inicio','date'],['endDate','Fecha de fin','date'],['place','Lugar'],['category','Actividad',['Carrera','Concentración','Entrenamiento de equipo','Trabajo de equipo']],['type','Categoría de carrera / circuito'],['status','Estado',['Programada','Confirmada','Finalizada','Cancelada']],['owner','Responsable']].map(f=>moduleInput(f,event,{})).join('')}</div><label>Información / horarios<textarea name="notes" rows="5">${esc(event.notes||'')}</textarea></label><button type="submit" class="primary">Guardar actividad</button><button id="backCalendar" type="button">Volver a la actividad</button></form>`;bindForm('eventDetails',async(_,data)=>{await api('/events/'+event.id+'/details','POST',data);await calendarPage(c,event.id);message('Actividad actualizada.');});document.getElementById('backCalendar').onclick=()=>calendarPage(c,event.id).catch(err=>message(err.message));}
-function addBulkUserImport(c){if(!me.owner)return;const box=document.createElement('div');box.className='card';box.innerHTML='<h2>Alta de usuarios desde listado</h2><small>CSV con columnas: nombre;correo;perfil. Perfiles: Dirección, Técnico, Corredor o Comunicación.</small><input type="file" id="usersCsv" accept=".csv"><div id="usersCsvPreview"></div>';c.prepend(box);document.getElementById('usersCsv').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const lines=(await f.text()).replace(/^\uFEFF/,'').trim().split(/\r?\n/);const map={'dirección':'director','direccion':'director','técnico':'technician','tecnico':'technician','corredor':'runner','comunicación':'communication','comunicacion':'communication'};const rows=lines.slice(1).map(l=>{const p=l.split(';').map(x=>x.trim());return {name:p[0],email:p[1],role:map[(p[2]||'').toLowerCase()]||p[2]};});if(rows.some(r=>!r.name||!r.email?.includes('@')||!roles[r.role]))throw Error('Revisa nombre, correo y perfil en cada fila.');document.getElementById('usersCsvPreview').innerHTML='<p>'+rows.length+' usuarios para revisar</p>'+rows.map(r=>'<p>'+esc(r.name)+' · '+esc(r.email)+' · '+esc(roles[r.role])+'</p>').join('')+'<button id="bulkUsersConfirm">Crear invitaciones</button>';document.getElementById('bulkUsersConfirm').onclick=async()=>{try{const response=await api('/invites/import','POST',{rows});document.getElementById('usersCsvPreview').innerHTML='<h3>Invitaciones creadas · entrega cada enlace a su destinatario</h3>'+response.invitations.map(i=>'<div class="row"><div>'+esc(i.name)+' · '+esc(i.email)+'<p class="secret">'+esc(inviteLink(i.token))+'</p></div></div>').join('')+'<small>No se ha enviado ningún correo. Los enlaces caducan en 48 horas.</small>';}catch(err){message(err.message);}};}catch(err){message(err.message);}};}
+function addBulkUserImport(c){if(!me.owner)return;const box=document.createElement('details');box.className='card';box.innerHTML='<summary>Importar invitaciones desde CSV</summary><small>CSV con columnas: nombre;correo;perfil. Perfiles: Dirección, Técnico, Corredor o Comunicación.</small><input type="file" id="usersCsv" accept=".csv"><div id="usersCsvPreview"></div>';c.querySelector('h1').after(box);document.getElementById('usersCsv').onchange=async e=>{try{const f=e.target.files[0];if(!f)return;const lines=(await f.text()).replace(/^\uFEFF/,'').trim().split(/\r?\n/);const map={'dirección':'director','direccion':'director','técnico':'technician','tecnico':'technician','corredor':'runner','comunicación':'communication','comunicacion':'communication'};const rows=lines.slice(1).map(l=>{const p=l.split(';').map(x=>x.trim());return {name:p[0],email:p[1],role:map[(p[2]||'').toLowerCase()]||p[2]};});if(rows.some(r=>!r.name||!r.email?.includes('@')||!roles[r.role]))throw Error('Revisa nombre, correo y perfil en cada fila.');document.getElementById('usersCsvPreview').innerHTML='<p>'+rows.length+' usuarios para revisar</p>'+rows.map(r=>'<p>'+esc(r.name)+' · '+esc(r.email)+' · '+esc(roles[r.role])+'</p>').join('')+'<button id="bulkUsersConfirm">Crear invitaciones</button>';document.getElementById('bulkUsersConfirm').onclick=async()=>{try{const response=await api('/invites/import','POST',{rows});document.getElementById('usersCsvPreview').innerHTML='<h3>Invitaciones creadas · entrega cada enlace a su destinatario</h3>'+response.invitations.map(i=>'<div class="row"><div>'+esc(i.name)+' · '+esc(i.email)+'<p class="secret">'+esc(inviteLink(i.token))+'</p></div></div>').join('')+'<small>No se ha enviado ningún correo. Los enlaces caducan en 48 horas.</small>';}catch(err){message(err.message);}};}catch(err){message(err.message);}};}
