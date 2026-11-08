@@ -315,6 +315,16 @@ async function vehicleAvailability(container,vehicles,events){
   day.onchange=redraw;
   redraw();
 }
+function clothingCatalog(){
+ return `<details class="card clothing-catalog"><summary>Ver diseños de la ropa · Júnior 2027</summary>
+  <p>Consulta cómo quedan las prendas antes de elegir tu talla o pedir ropa adicional.</p>
+  <a href="/static/ropa-calle-junior-2027.pdf" target="_blank" rel="noopener">
+   <img src="/static/ropa-calle-junior-2027.jpg" alt="Vista general del maillot y la colección de calle Miribilla Ecotisa Júnior 2027" width="1400" height="788" loading="lazy">
+  </a><div class="toolbar">
+   <a class="button" href="/static/ropa-calle-junior-2027.pdf" target="_blank" rel="noopener">Ver catálogo completo · 5 páginas</a>
+   <a href="/static/ropa-calle-junior-2027.pdf" download="Ropa_calle_Junior_2027.pdf">Descargar PDF</a>
+  </div></details>`;
+}
 function extraClothingOrders(orders){
  return orders.map(order=>`<article class="row"><div>
   <strong>${esc(order.created?.slice(0,10)||'Pedido')} · ${euros(order.amount)}</strong>
@@ -327,7 +337,7 @@ async function shopPage(c){
  const director=me.role==='director';
  const sizes=['XXS','XS','S','M','L','XL','XXL','XXXL'];
  const products=shop.products.filter(product=>product.price!=null);
- c.innerHTML=`<h1>Tienda</h1><p>Compra de ropa adicional del equipo.</p>
+ c.innerHTML=`<h1>Tienda</h1><p>Compra de ropa adicional del equipo.</p>${clothingCatalog()}
   ${director?`<form id="shopSettings" class="card"><h2>Precios y director asignado</h2>
    ${select('Director que recibe los pedidos','director',[['','Seleccionar'],...shop.directors.map(user=>[user.id,user.name])],shop.director)}
    <div class="grid">${shop.products.map((product,index)=>`<label>${esc(product.name)} · €<input name="price-${index}" type="number" min="0.01" max="1000" step="0.01" value="${product.price==null?'':product.price/100}"></label>`).join('')}</div>

@@ -450,7 +450,7 @@ const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('r
 async function listDocuments(id){const d=await api('/documents/'+id);document.getElementById('documents').innerHTML='<h2>Archivos registrados</h2>'+(d.documents.map(f=>`<div class="row"><span>${esc(({contrato_club:'Contrato del club',dni:'DNI · anverso',dni_reverso:'DNI · reverso',licencia:'Licencia federativa · anverso',licencia_reverso:'Licencia federativa · reverso',portrait:'Foto con equipación',action:'Foto en bicicleta'})[f.kind]||f.kind)} · ${Math.round(f.size/1024)} KB</span><div><a href="/api/file/${f.id}">Descargar</a> <button data-delete-file="${f.id}">Eliminar</button></div></div>`).join('')||'No hay documentos registrados.');document.querySelectorAll('[data-delete-file]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Eliminar este documento? Las copias de seguridad conservan su plazo de retención.'))return;try{await api('/file/'+b.dataset.deleteFile+'/delete','POST',{});await listDocuments(id);}catch(e){message(e.message);}});}
 async function myClothesPage(c){
  const [kit,shop]=await Promise.all([api('/clothes/mine'),api('/shop')]);
- c.innerHTML=`<h1>Mi ropa</h1><section class="card"><h2>Dotación del equipo</h2>
+ c.innerHTML=`<h1>Mi ropa</h1>${clothingCatalog()}<section class="card"><h2>Dotación del equipo</h2>
   <p>Prendas asignadas por el equipo.</p><div class="scroll"><table>
   <thead><tr><th>Prenda</th><th>Talla</th><th>Unidades</th></tr></thead><tbody>
   ${clothes.map(item=>`<tr><td>${esc(item)}</td><td>${esc(kit.sizes[item]||'Sin indicar')}</td><td>${kit.quantities[item]??0}</td></tr>`).join('')}
@@ -464,7 +464,7 @@ async function clothesPage(c){
   const [{riders},shop]=await Promise.all([api('/clothes'),api('/shop')]);
   const orders=shop.orders||[];
   const activeOrders=orders.filter(order=>order.paymentStatus!=='Anulado');
-  c.innerHTML=`<h1>Ropa por corredor · Dotación y extras</h1>
+  c.innerHTML=`<h1>Ropa por corredor · Dotación y extras</h1>${clothingCatalog()}
     <div class="toolbar"><button class="primary" type="button" id="clothesExport">Guardar y descargar dotación y extras · Excel</button>
     <button type="button" id="clothingShop">Gestionar tienda y precios</button>
     <button type="button" id="clothingCharges">Ver cobros por corredor</button></div>
