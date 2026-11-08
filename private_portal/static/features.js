@@ -13,7 +13,7 @@ const moduleSpecs={
  license:[['rider','Corredor','runner'],['number','Número de licencia'],['status','Estado',['No aportada','Pendiente de revisión','Verificada','Caducada']],['expiration','Caducidad','date'],['notes','Observaciones','textarea']],
  sport:[['rider','Corredor','runner'],['bike','Bicicleta · marca y modelo'],['bikeSize','Talla bicicleta'],['helmet','Talla casco'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)','integer'],['saddleToBar','Distancia sillín–manillar (mm)','integer'],['coach','Preparador'],['club','Club de procedencia'],['notes','Notas deportivas','textarea']]
 };
-const featureViews={shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:c=>modulePage(c,'sport'),results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
+const featureViews={shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
 const euros=n=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format((Number(n)||0)/100);
 let moduleContext={};
 async function dashboardPage(c){
@@ -31,6 +31,35 @@ async function dashboardPage(c){
  c.querySelectorAll('[data-shortcut]').forEach(b=>b.onclick=()=>navigate(b.dataset.shortcut));
 }
 async function getContext(kind){const [events,riders]=await Promise.all([api('/events'),api('/roster')]);const ctx={events:events.events,riders:riders.riders,people:[],staff:[],vehicle:[],entry:[],budget:[]};if(['director','technician'].includes(me.role))ctx.people=(await api('/people')).people;if(kind==='travel'){if(me.role!=='runner'){ctx.staff=(await api('/modules/staff')).records;ctx.vehicle=(await api('/modules/vehicle')).records;}}if(kind==='entry')ctx.budget=(await api('/modules/budget')).records;if(kind==='bank')ctx.entry=(await api('/modules/entry')).records;return ctx;}
+async function equipmentPage(c){
+ const [{riders},{records}]=await Promise.all([api('/roster'),api('/modules/sport')]);
+ const byRider=new Map(records.map(record=>[record.rider,record]));
+ const director=me.role==='director';
+ const measure=value=>Number(value)>0?esc(value):'Sin indicar';
+ c.innerHTML=`<h1>Medidas de la bici</h1>
+  <p>Alto: altura del sillín. Largo: distancia sillín–manillar. Medidas en milímetros.</p>
+  <div class="toolbar"><label>Buscar corredor<input type="search" id="bikeRiderSearch" placeholder="Nombre o apellidos"></label>
+   <a class="button" href="/api/modules/sport/export">Descargar Excel</a></div>
+  <div class="card scroll" id="bikeMeasurements"><table>
+   <thead><tr><th>Corredor</th><th>Talla de bici</th><th>Alto (mm)</th><th>Largo (mm)</th></tr></thead>
+   <tbody>${[...riders].sort((a,b)=>a.name.localeCompare(b.name,'es')).map(rider=>{
+    const record=byRider.get(rider.id)||{};
+    return `<tr data-search-name="${esc(rider.name)}"><td><strong>${esc(rider.name)}</strong>
+     ${director?`<button type="button" data-edit-bike="${esc(rider.id)}">Editar</button>`:''}</td>
+     <td>${esc(record.bikeSize||'Sin indicar')}</td><td>${measure(record.saddleHeight)}</td><td>${measure(record.saddleToBar)}</td></tr>`;
+   }).join('')}</tbody></table><p data-no-matches hidden>No hay corredores que coincidan.</p></div>`;
+ bindNameSearch(c.querySelector('#bikeRiderSearch'),c.querySelector('#bikeMeasurements'));
+ c.querySelectorAll('[data-edit-bike]').forEach(button=>button.onclick=async()=>{
+  try{
+   const record=byRider.get(button.dataset.editBike);
+   await modulePage(c,'sport',record?.id);
+   if(!record){
+    c.querySelector('#openNew').click();
+    c.querySelector('#moduleForm').elements.rider.value=button.dataset.editBike;
+   }
+  }catch(error){message(error.message);}
+ });
+}
 function fieldOptions(type,ctx){const optional=String(type).endsWith('?');let values=[];if(type.startsWith('event'))values=ctx.events.map(x=>[x.id,x.name]);else if(type.startsWith('runner'))values=ctx.riders.map(x=>[x.id,x.name]);else if(type.startsWith('person'))values=ctx.people.map(x=>[x.id,x.name+' · '+roles[x.role]]);else if(type==='entry?')values=ctx.entry.map(x=>[x.id,x.concept+' · '+euros(x.amount)]);else values=(ctx[type]||[]).map(x=>[x.id,x.name]);return optional?[['','Sin asignar'],...values]:values;}
 function moduleInput([key,label,type='text'],data,ctx){let v=data[key]??'';if(type==='budget?'){
  const options=[['','Sin asignar'],...ctx.budget.map(part=>[part.id,part.category])];
@@ -41,7 +70,7 @@ function moduleValue(value,key,ctx,spec){if(['saddleHeight','saddleToBar'].inclu
 async function modulePage(c,kind,editing=null,event=null){
 const [ctx,d]=await Promise.all([getContext(kind),api('/modules/'+kind+(event?'?event='+encodeURIComponent(event.id):''))]);
 if(event)ctx.fixedEvent=event;
-const redraw=(id=null)=>modulePage(c,kind,id,event);
+const redraw=(id=null)=>kind==='sport'&&!id?equipmentPage(c):modulePage(c,kind,id,event);
 const issuedStaff=new Map();
 moduleContext=ctx;const spec=moduleSpecs[kind];let rows=d.records;if(kind==='license')rows.sort((a,b)=>(ctx.riders.find(r=>r.id===a.rider)?.name||'').localeCompare(ctx.riders.find(r=>r.id===b.rider)?.name||'','es'));const canEdit=me.role==='director';if(me.role==='communication'&&kind!=='post')throw Error('Sin permiso');const edit=editing?rows.find(x=>x.id===editing)||{}:kind==='entry'?{event:event?.id||'',direction:'Gasto',status:'Pendiente',category:'Otros'}:{};
 let totals='';if(kind==='days'){const total=rows.reduce((sum,r)=>sum+r.days,0);totals='<div class="note">Total de días registrados: <b>'+total+'</b></div>';}if(event){
