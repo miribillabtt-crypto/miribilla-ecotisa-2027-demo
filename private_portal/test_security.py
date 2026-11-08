@@ -79,7 +79,8 @@ def test_technician_password_from_existing_staff_row(env):
  staff=director.post(staff_path,json={'name':'Eva Núñez'},headers=h).json['id']
  assert technician.post(path,json={'staffId':staff},headers=th).status_code==403
  account=limited.post(path,json={'staffId':staff},headers=lh).json['accounts'][0]
- assert account['username']=='eva.nunez' and account['password'].startswith('Nunez-')
+ assert account['username']=='eva.nunez' and len(account['password'])==8
+ assert account['password'].isalnum() and account['password']==account['password'].lower()
  assert limited.post(path,json={'staffId':staff,'replace':True},headers=lh).status_code==403
  assert director.post(path,json={'staffId':staff},headers=h).status_code==409
  client=app.test_client()
@@ -96,6 +97,17 @@ def test_technician_password_from_existing_staff_row(env):
  assert client.get('/api/me').json['user']['id']==ids['technician']
  invalid=director.post(staff_path,json={'name':'Otra ficha','user':ids['runner']},headers=h).json['id']
  assert director.post(path,json={'staffId':invalid,'replace':True},headers=h).status_code==409
+ assert limited.post(path,json={'replaceAll':True},headers=lh).status_code==403
+ eva=next(row for row in director.get(staff_path).json['records'] if row['id']==staff)
+ assert director.post(staff_path,json={'name':'Ficha duplicada','user':eva['user']},headers=h).status_code==200
+ replacements=director.post(path,json={'replaceAll':True},headers=h)
+ assert replacements.status_code==200,replacements.json
+ assert len(replacements.json['accounts'])==2
+ assert 'Otra ficha' in replacements.json['skipped']
+ for replacement in replacements.json['accounts']:
+  assert len(replacement['password'])==8 and replacement['password'].isalnum()
+  fresh=app.test_client()
+  assert fresh.post('/api/login',json={'email':replacement['username'],'password':replacement['password']}).status_code==200
 
 def test_runner_cannot_read_other_profile(env):
  _,ids,login,_=env;c,h=login('runner')

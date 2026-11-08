@@ -13,15 +13,6 @@ from PIL import Image
 from roster_import import normalize
 
 Base=declarative_base()
-STAFF_PASSWORD_WORDS=(
-    'Abeto','Agua','Aire','Arena','Arroyo','Azul','Bahia','Barco','Bosque','Brisa',
-    'Cacao','Cala','Campo','Canto','Cedro','Cielo','Cima','Claro','Costa','Duna',
-    'Eco','Faro','Flor','Fuente','Giro','Haya','Isla','Jara','Junco','Lago',
-    'Lima','Lirio','Llano','Loma','Luna','Mar','Menta','Mirlo','Monte','Nube',
-    'Ola','Olmo','Paseo','Pico','Pino','Playa','Prado','Puente','Rama','Rayo',
-    'Rema','Ria','Rio','Roble','Roca','Rosa','Ruta','Senda','Sol','Sur',
-    'Tramo','Trigo','Valle','Vela',
-)
 def uid(): return secrets.token_hex(16)
 def digest(v): return hashlib.sha256(v.encode()).hexdigest()
 class User(Base):
@@ -305,6 +296,9 @@ def create_app(test_config=None):
         from rider_accounts import alias_key
 
         d=body()
+        replace_all=d.get('replaceAll') is True
+        if replace_all and not g.user.owner:abort(403,'Solo la cuenta responsable de Dirección puede cambiar las contraseñas existentes')
+        if replace_all and ('name' in d or 'staffId' in d):abort(400)
         if g.db.get_bind().dialect.name=='postgresql':
             g.db.execute(sql_text('SELECT pg_advisory_xact_lock(20273004)'))
         staff=g.db.scalars(select(Record).where(Record.kind=='module:staff').order_by(Record.id).with_for_update()).all()
@@ -324,21 +318,27 @@ def create_app(test_config=None):
             g.db.add(record)
             staff=[record]
         usernames=set(g.db.scalars(select(User.email).where(User.email.is_not(None))))
-        accounts=[]; skipped=[]
+        accounts=[]; skipped=[]; processed_users=set()
         for record in staff:
             data=unseal(record.data)
             name=data['name']
             user=None
-            if individual and data.get('user'):
+            if (individual or replace_all) and data.get('user'):
                 user=g.db.get(User,data['user'],with_for_update=True)
                 if not user or not user.active or user.role!='technician' or user.owner or user.documents:
+                    if replace_all:
+                        skipped.append(name)
+                        continue
                     abort(409,'Revisa el usuario vinculado a esta ficha')
                 if user.password and not g.user.owner:
                     abort(403,'Solo la cuenta responsable de Dirección puede cambiar una contraseña existente')
-                if user.password and d.get('replace') is not True:
+                if user.password and d.get('replace') is not True and not replace_all:
                     abort(409,'Confirma el cambio de contraseña')
             if not user and (data.get('user') or normalize(name) in technician_names):
                 if individual:abort(409,'Ya existe una cuenta con ese nombre. Vincúlala desde Editar.')
+                skipped.append(name)
+                continue
+            if user and user.id in processed_users:
                 skipped.append(name)
                 continue
             base='.'.join(re.findall(r'[a-z0-9]+',normalize(name).lower()))[:80].rstrip('.') or 'tecnico'
@@ -351,9 +351,7 @@ def create_app(test_config=None):
                     if username not in usernames and (not alias or user and alias.owner_id==user.id):break
                     username=f'{base}.{suffix}'
                     suffix+=1
-            surname=base.rsplit('.',1)[-1].capitalize()
-            words=[secrets.choice(STAFF_PASSWORD_WORDS) for _ in range(2)]
-            password='-'.join([surname,*words,f'{secrets.randbelow(10000000):07}'])
+            password=''.join(secrets.choice('abcdefghjkmnpqrstuvwxyz23456789') for _ in range(8))
             if user:
                 if username!=user.email and not alias:
                     g.db.add(Record(id=alias_key(username),kind='system:login-alias',owner_id=user.id,
@@ -368,6 +366,7 @@ def create_app(test_config=None):
                 record.data=seal(data)
                 audit('technician_account_created',user.id)
             user.password=generate_password_hash(password,method='scrypt:32768:8:1')
+            processed_users.add(user.id)
             usernames.add(username)
             technician_names.add(normalize(name))
             accounts.append(dict(name=name,username=username,password=password))

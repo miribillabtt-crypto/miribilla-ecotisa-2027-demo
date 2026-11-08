@@ -37,7 +37,7 @@ function moduleInput([key,label,type='text'],data,ctx){let v=data[key]??'';if(ty
  if(v&&!ctx.budget.some(part=>part.id===v))options.push([v,(data.budgetName||'Partida')+' (archivada)']);
  return select(label,key,options,v);
 }if(Array.isArray(type))return select(label,key,type,v);if(type==='textarea')return `<label>${esc(label)}<textarea name="${key}" maxlength="2500" rows="3">${esc(v)}</textarea></label>`;if(String(type).endsWith('[]')){const opts=fieldOptions(type.slice(0,-2),ctx);return `<fieldset><legend>${esc(label)}</legend>${opts.length?opts.map(([id,name])=>`<label class="checkline"><input type="checkbox" name="${key}" value="${id}" ${(data[key]||[]).includes(id)?'checked':''}>${esc(name)}</label>`).join(''):'Sin recursos registrados'}</fieldset>`;}if(['event','event?','runner','person','person?','entry?'].includes(type))return select(label,key,fieldOptions(type,ctx),v);if(type==='money')return `<label>${esc(label)}<input name="${key}" type="number" step="0.01" min="0" value="${v===''&&['baseAmount','taxAmount','amount'].includes(key)&&data.direction!==undefined?'':(Number(v)||0)/100}" ${['baseAmount','taxAmount'].includes(key)?'':'required'}></label>`;if(type==='integer')return `<label>${esc(label)}<input name="${key}" type="number" min="0" step="1" value="${v||0}" required></label>`;return field(label,key,type==='url'?'url':type==='date'?'date':'text',v);}
-function moduleValue(value,key,ctx,spec){if(value===undefined)return '';if(spec.find(x=>x[0]===key)?.[2]==='money')return euros(value);if(['event','rider','person','matched'].includes(key))return [...ctx.events,...ctx.riders,...ctx.people,...ctx.entry].find(x=>x.id===value)?.name||ctx.entry.find(x=>x.id===value)?.concept||value||'Sin asignar';if(Array.isArray(value))return value.map(id=>[...ctx.staff,...ctx.vehicle].find(x=>x.id===id)?.name||id).join(', ');return String(value);}
+function moduleValue(value,key,ctx,spec){if(['saddleHeight','saddleToBar'].includes(key))return Number(value)>0?String(value)+' mm':'Sin indicar';if(value===undefined)return '';if(spec.find(x=>x[0]===key)?.[2]==='money')return euros(value);if(['event','rider','person','matched'].includes(key))return [...ctx.events,...ctx.riders,...ctx.people,...ctx.entry].find(x=>x.id===value)?.name||ctx.entry.find(x=>x.id===value)?.concept||value||'Sin asignar';if(Array.isArray(value))return value.map(id=>[...ctx.staff,...ctx.vehicle].find(x=>x.id===id)?.name||id).join(', ');return String(value);}
 async function modulePage(c,kind,editing=null,event=null){
 const [ctx,d]=await Promise.all([getContext(kind),api('/modules/'+kind+(event?'?event='+encodeURIComponent(event.id):''))]);
 if(event)ctx.fixedEvent=event;
@@ -70,6 +70,11 @@ c.innerHTML=`${event?'<h2>Facturas y gastos de la actividad</h2>':`<h1>${kind===
  <form id="splitExpenses"><p>Marca solo los gastos que se cobran a los corredores. Se dividen a partes iguales entre los convocados de la convocatoria publicada.</p>
  ${rows.filter(row=>row.amount>0&&row.status!=='Anulado').map(row=>`<label class="checkline"><input type="checkbox" name="expense" value="${esc(row.id)}" ${row.splitRecorded?'disabled':''}>${esc(row.concept||row.counterparty||row.category||'Gasto')} · ${euros(row.amount)}${row.splitRecorded?' · Ya repartido':''}</label>`).join('')}
  <button type="submit">Registrar cobros por corredor</button></form></details>`:''}`;
+if(kind==='sport'){
+ const note=document.createElement('p');
+ note.textContent='Alto: altura del sillín. Largo: distancia sillín–manillar. Medidas en milímetros.';
+ c.querySelector('h1').after(note);
+}
 if(kind==='entry'&&canEdit){
  const exports=document.createElement('details');
  exports.className='card';
@@ -126,7 +131,7 @@ function licenseCells(row){
  const download=photos.licencia||photos.licencia_reverso?`<a class="button" href="/api/licenses/${encodeURIComponent(row.rider)}/pdf">Descargar licencia en PDF</a>`:'Sin licencia subida';
  return original+`<td>${download}</td>`;
 }
-function table(){const query=(document.getElementById('moduleSearch').value||'').toLocaleLowerCase('es');const status=document.getElementById('licenseStatus')?.value||'Todos';const filtered=rows.filter(r=>(status==='Todos'||r.status===status)&&spec.map(([key])=>key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec)).join(' ').toLocaleLowerCase('es').includes(query));const columns=event?spec.filter(([key])=>['date','category','budget','concept','counterparty','amount','status'].includes(key)):kind==='entry'?spec.slice(0,6):spec.slice(0,5);document.getElementById('moduleRows').innerHTML=filtered.length?`<div class="card scroll"><table><thead><tr>${columns.map(x=>'<th>'+esc(x[1])+'</th>').join('')}${kind==='entry'?'<th>Justificante original</th><th>Cobro a convocados</th>':''}${kind==='budget'?'<th>Gasto asignado</th><th>Disponible</th>':''}${kind==='license'&&me.documents?'<th>Anverso</th><th>Reverso</th><th>Descarga</th>':''}<th>Detalle</th>${canEdit?'<th>Acciones</th>':''}</tr></thead><tbody>${filtered.map(r=>`<tr>${columns.map(([key])=>'<td>'+esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))+'</td>').join('')}${kind==='entry'?`<td>${(r.attachments||[]).map(a=>`<a href="/api/invoice-file/${a.id}">${esc(a.name)}</a>`).join('<br>')||'Sin adjuntar'}</td>`:''}${kind==='budget'?`<td>${euros(r.spent)}</td><td>${euros(r.amount-r.spent)}</td>`:''}${expenseSplitCell(r)}${licenseCells(r)}<td><details><summary>Ver ficha</summary><dl>${spec.filter(([key])=>r[key]!==undefined).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))}</dd>`).join('')}</dl></details></td>${canEdit&&kind==='license'&&!r.id?`<td><button data-new-license="${esc(r.rider)}">Añadir ficha</button></td>`:canEdit?`<td><button data-edit="${r.id}">Editar</button> <button data-archive="${r.id}">Archivar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="card">Sin registros para mostrar.</div>';c.querySelectorAll('[data-new-license]').forEach(button=>button.onclick=()=>{
+function table(){const query=(document.getElementById('moduleSearch').value||'').toLocaleLowerCase('es');const status=document.getElementById('licenseStatus')?.value||'Todos';const filtered=rows.filter(r=>(status==='Todos'||r.status===status)&&spec.map(([key])=>key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec)).join(' ').toLocaleLowerCase('es').includes(query));const columns=event?spec.filter(([key])=>['date','category','budget','concept','counterparty','amount','status'].includes(key)):kind==='entry'?spec.slice(0,6):kind==='sport'?[['rider','Corredor'],['bike','Bicicleta'],['bikeSize','Talla'],['saddleHeight','Alto'],['saddleToBar','Largo']]:spec.slice(0,5);document.getElementById('moduleRows').innerHTML=filtered.length?`<div class="card scroll"><table><thead><tr>${columns.map(x=>'<th>'+esc(x[1])+'</th>').join('')}${kind==='entry'?'<th>Justificante original</th><th>Cobro a convocados</th>':''}${kind==='budget'?'<th>Gasto asignado</th><th>Disponible</th>':''}${kind==='license'&&me.documents?'<th>Anverso</th><th>Reverso</th><th>Descarga</th>':''}<th>Detalle</th>${canEdit?'<th>Acciones</th>':''}</tr></thead><tbody>${filtered.map(r=>`<tr>${columns.map(([key])=>'<td>'+esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))+'</td>').join('')}${kind==='entry'?`<td>${(r.attachments||[]).map(a=>`<a href="/api/invoice-file/${a.id}">${esc(a.name)}</a>`).join('<br>')||'Sin adjuntar'}</td>`:''}${kind==='budget'?`<td>${euros(r.spent)}</td><td>${euros(r.amount-r.spent)}</td>`:''}${expenseSplitCell(r)}${licenseCells(r)}<td><details><summary>Ver ficha</summary><dl>${spec.filter(([key])=>r[key]!==undefined).map(([key,label])=>`<dt>${esc(label)}</dt><dd>${esc(key==='budget'?(r.budgetName||'Sin asignar'):moduleValue(r[key],key,ctx,spec))}</dd>`).join('')}</dl></details></td>${canEdit&&kind==='license'&&!r.id?`<td><button data-new-license="${esc(r.rider)}">Añadir ficha</button></td>`:canEdit?`<td><button data-edit="${r.id}">Editar</button> <button data-archive="${r.id}">Archivar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:'<div class="card">Sin registros para mostrar.</div>';c.querySelectorAll('[data-new-license]').forEach(button=>button.onclick=()=>{
  document.getElementById('openNew').click();
  document.getElementById('moduleForm').elements.rider.value=button.dataset.newLicense;
 });
@@ -390,11 +395,13 @@ async function resourceMatrix(c,section){
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
  c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
-  ${section==='staff'&&me.role==='director'?`<details class="card"><summary>Dar de alta técnico</summary>
+  ${section==='staff'&&me.role==='director'?`<details class="card"><summary>Altas y contraseñas de técnicos</summary>
    <form id="createTechnician"><label>Nombre y apellidos<input name="name" maxlength="150" required></label>
     <button class="primary" type="submit">Guardar técnico y crear acceso</button></form>
    <p>Para las fichas que ya existen, genera los accesos pendientes con un solo botón.</p>
    <button type="button" id="createPendingTechnicians">Generar accesos pendientes</button>
+   <p>Las contraseñas nuevas tienen 8 caracteres: minúsculas y números, sin signos.</p>
+   ${me.owner?'<button type="button" id="simplifyTechnicianPasswords">Simplificar contraseñas existentes</button>':''}
    <p id="technicianAccountStatus" role="status"></p>
    <div id="technicianCredentials" hidden></div>
   </details>`:''}
@@ -413,10 +420,13 @@ async function resourceMatrix(c,section){
    const results=c.querySelector('#technicianCredentials');
    if(!results)return;
    c.querySelector('#technicianAccountStatus').textContent=accounts.length?
-    (accounts.length===1?'Se ha creado un acceso.':`Se han creado ${accounts.length} accesos.`):
+    (accounts.length===1?'Acceso listo para copiar.':`${accounts.length} accesos listos para copiar.`):
     'No hay accesos pendientes. Revisa las fichas y los usuarios vinculados.';
    if(!accounts.length)return;
-   issued.push(...accounts);
+   for(const account of accounts){
+    const previous=issued.findIndex(item=>item.username===account.username);
+    if(previous===-1)issued.push(account);else issued[previous]=account;
+   }
    results.hidden=false;
    showTechnicianCredentials(results,issued);
    if(skipped.length)c.querySelector('#technicianAccountStatus').textContent+=` ${skipped.length} fichas ya tenían un acceso o una cuenta con ese nombre.`;
@@ -429,6 +439,15 @@ async function resourceMatrix(c,section){
    try{message('');await createAccounts({});}
    catch(error){message(error.message);}
    finally{newAccounts.disabled=false;}
+  };
+  const simplify=c.querySelector('#simplifyTechnicianPasswords');
+  if(simplify)simplify.onclick=async()=>{
+   if(!confirm('¿Cambiar las contraseñas de los técnicos por claves de 8 caracteres? Se cerrarán sus sesiones y tendrás que entregarles las claves nuevas.'))return;
+   simplify.disabled=true;
+   newAccounts.disabled=true;
+   try{message('');await createAccounts({replaceAll:true});}
+   catch(error){message(error.message);}
+   finally{simplify.disabled=false;newAccounts.disabled=false;}
   };
  }
  const render=()=>{
