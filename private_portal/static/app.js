@@ -375,28 +375,34 @@ async function listDocuments(id){const d=await api('/documents/'+id);document.ge
 async function clothesPage(c){
   const {riders}=await api('/clothes');
   c.innerHTML=`<h1>Ropa · Pedido del equipo</h1>
-    <button class="primary" type="button" id="clothesExport">Guardar y descargar pedido · Excel</button>
+    <button class="primary" type="button" id="clothesExport">Guardar y descargar pedido total · Excel</button>
     <p id="clothesTotal"></p>
-    <div class="note">El detalle incluye las tallas registradas. El resumen del proveedor suma solo las unidades de pedido. Si falta una cantidad, aparecerá como pendiente.</div>`+riders.map(r=>`
+    <div class="note">Dotación por defecto por corredor: una unidad de cada prenda y dos camisetas, incluido el chaleco. Se respetan las cantidades que ya hayas ajustado. Puedes poner 0 para excluir una prenda. El Excel incluye detalle por corredor, resumen por tallas y total por prenda.</div>
+    <details class="card"><summary>Ver total por prenda</summary><div id="clothesSummary"></div></details>`+riders.map(r=>`
     <form method="post" class="card" data-clothing="${esc(r.id)}">
       <h2>${esc(r.name)}</h2>
       <div class="scroll"><table><thead><tr><th>Prenda</th><th>Talla registrada</th><th>Unidades</th></tr></thead>
       <tbody>${clothes.map(item=>`<tr><td>${esc(item)}</td><td>${esc(r.sizes[item]||'Sin indicar')}</td>
-      <td><input type="number" name="${esc(item)}" min="0" max="100" step="1" value="${r.quantities[item]??''}" aria-label="Cantidad de ${esc(item)}"></td></tr>`).join('')}</tbody></table></div>
+      <td><input type="number" name="${esc(item)}" min="0" max="100" step="1" required value="${r.quantities[item]??(item==='Camiseta'?2:1)}" aria-label="Cantidad de ${esc(item)}"></td></tr>`).join('')}</tbody></table></div>
       <button type="submit">Guardar cantidades</button>
     </form>`).join('');
   const forms=[...c.querySelectorAll('[data-clothing]')];
   const download=c.querySelector('#clothesExport');
   const total=()=>forms.flatMap(f=>[...new FormData(f).values()]).reduce((sum,value)=>sum+Number(value),0);
-  const showTotal=()=>{c.querySelector('#clothesTotal').textContent='Unidades en el pedido: '+total();};
+  const showTotal=()=>{
+    c.querySelector('#clothesTotal').textContent=`${riders.length} corredores · ${total()} unidades en el pedido`;
+    c.querySelector('#clothesSummary').innerHTML=`<table><thead><tr><th>Prenda</th><th>Unidades</th></tr></thead><tbody>${clothes.map(item=>{
+      const quantity=forms.reduce((sum,form)=>sum+Number(form.elements.namedItem(item).value),0);
+      return `<tr><td>${esc(item)}</td><td>${quantity}</td></tr>`;
+    }).join('')}</tbody></table>`;
+  };
   showTotal();
   const snapshot=form=>JSON.stringify(Object.fromEntries(new FormData(form)));
   const saved=new Map(forms.map(form=>[form,snapshot(form)]));
   const save=async form=>{
     const values=snapshot(form);
     if(values===saved.get(form))return;
-    const quantities=Object.fromEntries(Object.entries(JSON.parse(values))
-      .filter(([,value])=>value!=='').map(([item,value])=>[item,Number(value)]));
+    const quantities=Object.fromEntries(Object.entries(JSON.parse(values)).map(([item,value])=>[item,Number(value)]));
     await api('/profile/'+form.dataset.clothing,'POST',{quantities});
     saved.set(form,values);
   };
@@ -410,7 +416,7 @@ async function clothesPage(c){
     form.oninput=showTotal;
     form.onsubmit=e=>{
       e.preventDefault();
-      run(async()=>{await save(form);message('Cantidades del pedido guardadas.');});
+      run(async()=>{if(!form.reportValidity())return;await save(form);message('Cantidades del pedido guardadas.');});
     };
   });
   download.onclick=()=>run(async()=>{

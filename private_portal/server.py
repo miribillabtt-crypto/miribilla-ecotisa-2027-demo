@@ -54,7 +54,11 @@ class Attempt(Base):
 
 ROLES={'director','technician','runner','communication'}
 FINE_TYPES=[('Falta de respeto leve',5),('Falta de respeto moderada',10),('Falta de respeto grave','Expulsión'),('Material en mal estado',5),('Llega 5 minutos tarde',5),('Llega 10 minutos tarde',10),('Llega 15 minutos tarde',15),('No trae ropa adecuada',5),('Otras · 5 €',5),('Otras · 10 €',10)]
-CLOTHES=['Maillot corto','Maillot largo','Culote corto','Culote largo','Gava','Buzo','Pantalón largo','Pantalón corto','Camiseta','Polo','Sudadera','Plumas']
+CLOTHES=['Maillot corto','Maillot largo','Culote corto','Culote largo','Gava','Buzo','Chaleco','Pantalón largo','Pantalón corto','Camiseta','Polo','Sudadera','Plumas']
+def clothing_quantities(profile):
+    quantities={item:2 if item=='Camiseta' else 1 for item in CLOTHES}
+    quantities.update({item:qty for item,qty in profile.get('quantities',{}).items() if item in CLOTHES})
+    return quantities
 PRIVATE_TYPES={'dni','dni_reverso','sepa','licencia','licencia_reverso','autorizacion','contrato_club'}
 PHOTO_TYPES={'portrait','action'}
 
@@ -601,7 +605,12 @@ def create_app(test_config=None):
 
     @app.get('/api/clothes')
     @require('director')
-    def clothes():return jsonify(riders=[{'id':u.id,'name':u.name,'sizes':unseal(u.profile).get('sizes',{}),'quantities':unseal(u.profile).get('quantities',{})} for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True))])
+    def clothes():
+        riders=[]
+        for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True).order_by(User.name,User.id)):
+            profile=unseal(u.profile)
+            riders.append(dict(id=u.id,name=u.name,sizes=profile.get('sizes',{}),quantities=clothing_quantities(profile)))
+        return jsonify(riders=riders)
     @app.get('/api/clothes/export')
     @require('director')
     def export():
@@ -610,19 +619,27 @@ def create_app(test_config=None):
         for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True).order_by(User.name,User.id)):
             profile=unseal(u.profile)
             sizes=profile.get('sizes',{})
-            quantities=profile.get('quantities',{})
+            quantities=clothing_quantities(profile)
             for item in CLOTHES:
                 size=sizes.get(item)
                 qty=quantities.get(item)
-                if not size and not qty:continue
                 size=size or 'Sin indicar'
-                ws.append([safe(u.name),item,size,qty if qty is not None else 'Pendiente'])
+                ws.append([safe(u.name),item,size,qty])
                 if qty:
                     total[(item,size)]=total.get((item,size),0)+qty
         ws=wb.create_sheet('Resumen proveedor');ws.append(['Prenda','Talla','Cantidad'])
         for (item,size),qty in sorted(total.items()):ws.append([item,size,qty])
+        ws=wb.create_sheet('Total por prenda');ws.append(['Prenda','Cantidad total'])
+        for item in CLOTHES:
+            ws.append([item,sum(qty for (prenda,size),qty in total.items() if prenda==item)])
+        ws.append(['TOTAL UNIDADES',sum(total.values())])
+        from openpyxl.styles import Font, PatternFill
         for sheet in wb:
             sheet.freeze_panes='A2'
+            sheet.auto_filter.ref=f'A1:{sheet.cell(sheet.max_row,sheet.max_column).coordinate}' if sheet.title!='Total por prenda' else f'A1:B{sheet.max_row-1}'
+            for cell in sheet[1]:
+                cell.font=Font(bold=True,color='FFFFFF')
+                cell.fill=PatternFill('solid',fgColor='173047')
             for col in sheet.columns:sheet.column_dimensions[col[0].column_letter].width=25
         stream=io.BytesIO();wb.save(stream);stream.seek(0);audit('clothes_exported');return send_file(stream,as_attachment=True,download_name='Pedido_ropa_Miribilla_Ecotisa.xlsx',mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     @app.get('/api/fines')

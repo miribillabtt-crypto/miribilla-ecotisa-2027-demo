@@ -154,7 +154,7 @@ def test_invite_single_use_and_no_role_escalation(env):
  with app.extensions['db_sessions']() as db:
   u=db.scalar(select(User).where(User.email=='new@test.invalid'));assert u.role=='runner' and not u.documents
 
-def test_clothes_export_lists_pending_sizes_and_sums_registered_quantities(env):
+def test_clothes_export_defaults_and_registered_quantities(env):
  _,ids,login,_=env;c,h=login('director')
  r=c.post('/api/profile/'+ids['runner'],json={'sizes':{'Maillot corto':'S','Culote corto':'XS'},'quantities':{'Maillot corto':2,'Camiseta':3}},headers=h)
  assert r.status_code==200
@@ -162,8 +162,21 @@ def test_clothes_export_lists_pending_sizes_and_sums_registered_quantities(env):
  assert r.status_code==200
  from openpyxl import load_workbook
  wb=load_workbook(io.BytesIO(c.get('/api/clothes/export').data))
- assert list(wb['Resumen proveedor'].values)==[('Prenda','Talla','Cantidad'),('Camiseta','Sin indicar',3),('Maillot corto','S',3)]
- assert ('runner','Culote corto','XS','Pendiente') in list(wb['Por corredor'].values)
+ summary={(item,size):qty for item,size,qty in list(wb['Resumen proveedor'].values)[1:]}
+ assert summary[('Camiseta','Sin indicar')]==5
+ assert summary[('Maillot corto','S')]==3
+ assert summary[('Chaleco','Sin indicar')]==2
+ assert ('runner','Culote corto','XS',1) in list(wb['Por corredor'].values)
+ totals=dict(list(wb['Total por prenda'].values)[1:])
+ assert totals['Camiseta']==5 and totals['Chaleco']==2
+ assert totals['TOTAL UNIDADES']==30
+ api_riders={rider['id']:rider for rider in c.get('/api/clothes').json['riders']}
+ assert api_riders[ids['runner2']]['quantities']['Camiseta']==2
+ assert api_riders[ids['runner2']]['quantities']['Chaleco']==1
+ assert c.post('/api/profile/'+ids['runner2'],json={'quantities':{'Chaleco':0}},headers=h).status_code==200
+ updated=load_workbook(io.BytesIO(c.get('/api/clothes/export').data))
+ assert dict(list(updated['Total por prenda'].values)[1:])['Chaleco']==1
+ assert len(list(updated['Por corredor'].values))==27
 
 def test_call_requires_available_runner(env):
  app,ids,login,_=env;c,h=login('director');assert c.post('/api/events',json={'name':'Carrera','date':'2027-02-01','place':'Bilbao'},headers=h).status_code==200
