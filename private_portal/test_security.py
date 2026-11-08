@@ -184,6 +184,22 @@ def test_call_requires_available_runner(env):
  r,rh=login('runner');assert r.post('/api/events/'+eid+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
  assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
 
+def test_runner_only_reads_own_fines(env):
+ _,ids,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ other,_=login('runner2')
+ assert runner.get('/api/fines').json['fines']==[]
+ for role in ('runner','runner2'):
+  assert director.post('/api/fines',json={'user':ids[role],'type':0,'note':role},headers=h).status_code==200
+ all_fines=director.get('/api/fines').json['fines']
+ assert len(all_fines)==2
+ for client,role in ((runner,'runner'),(other,'runner2')):
+  fines=client.get('/api/fines?user='+ids['runner2']).json['fines']
+  assert len(fines)==1 and fines[0]['user']==ids[role]
+ foreign=next(fine for fine in all_fines if fine['user']==ids['runner2'])
+ assert runner.post('/api/fines/'+foreign['id']+'/status',json={'status':'Pagada'},headers=rh).status_code==403
+
 def test_photos_require_consent_for_communication(env):
  app,ids,login,_=env;c,h=login('runner');img=io.BytesIO();Image.new('RGB',(10,10)).save(img,format='PNG')
  c.post('/api/documents/'+ids['runner'],data={'kind':'portrait','file':(io.BytesIO(img.getvalue()),'photo.png')},headers=h)

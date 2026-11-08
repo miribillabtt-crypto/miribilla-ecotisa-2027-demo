@@ -431,7 +431,40 @@ async function clothesPage(c){
     link.click();
   });
 }
-async function finesPage(c){const d=await api('/fines');roster=(await api('/roster')).riders;c.innerHTML=`<h1>${me.role==='runner'?'Mis multas':'Multas'}</h1>${me.role==='director'?`<form method="post" id="fine" class="card">${select('Corredor','user',roster.map(r=>[r.id,r.name]))}${select('Motivo e importe','type',fineTypes.map(([reason,amount],i)=>[String(i),reason+' · '+(typeof amount==='number'?amount+' €':amount)]))}<label>Observaciones<textarea name="note" maxlength="300"></textarea></label><small>Las faltas graves se registran para decisión de Dirección; no eliminan automáticamente al corredor.</small><button type="submit">Registrar multa</button></form>`:''}<div class="card scroll"><table><thead><tr><th>Fecha</th><th>Corredor</th><th>Motivo</th><th>Importe o medida</th><th>Estado</th></tr></thead><tbody>${d.fines.map(f=>`<tr><td>${esc(f.date)}</td><td>${esc(roster.find(r=>r.id===f.user)?.name||'Corredor')}</td><td>${esc(f.reason)}</td><td>${typeof f.amount==='number'?f.amount+' €':esc(f.amount)}</td><td>${esc(f.status)}${me.role==='director'?`<select data-fine-status="${f.id}" aria-label="Estado de la multa">${['Pendiente','Pagada','Anulada','Pendiente de decisión','Resuelta'].map(v=>`<option ${v===f.status?'selected':''}>${v}</option>`).join('')}</select>`:''}</td></tr>`).join('')}</tbody></table></div>`;c.querySelectorAll('[data-fine-status]').forEach(el=>el.onchange=async()=>{try{await api('/fines/'+el.dataset.fineStatus+'/status','POST',{status:el.value});message('Estado actualizado.');}catch(e){message(e.message);}});bindForm('fine',async(_,data)=>{data.type=Number(data.type);await api('/fines','POST',data);await navigate('fines');});}
+async function finesPage(c){
+ const {fines}=await api('/fines');
+ const director=me.role==='director';
+ const personal=me.role==='runner';
+ const rows=personal?fines.filter(fine=>fine.user===me.id):fines;
+ const riders=director?(await api('/roster')).riders:[];
+ c.innerHTML=`<h1>${personal?'Mis multas':'Multas'}</h1>
+  ${director?`<form method="post" id="fine" class="card">
+    ${select('Corredor','user',riders.map(rider=>[rider.id,rider.name]))}
+    ${select('Motivo e importe','type',fineTypes.map(([reason,amount],index)=>[String(index),reason+' · '+(typeof amount==='number'?amount+' €':amount)]))}
+    <label>Observaciones<textarea name="note" maxlength="300"></textarea></label>
+    <small>Las faltas graves se registran para decisión de Dirección; no eliminan automáticamente al corredor.</small>
+    <button type="submit" class="primary">Registrar multa</button></form>`:''}
+  ${rows.length?`<div class="card scroll"><table><thead><tr>
+    <th>Fecha</th>${director?'<th>Corredor</th>':''}<th>Motivo</th><th>Importe</th><th>Estado</th>
+   </tr></thead><tbody>${rows.map(fine=>`<tr><td>${esc(fine.date)}</td>
+    ${director?`<td>${esc(riders.find(rider=>rider.id===fine.user)?.name||'Corredor')}</td>`:''}
+    <td>${esc(fine.reason)}</td><td>${typeof fine.amount==='number'?fine.amount+' €':esc(fine.amount)}</td>
+    <td>${esc(fine.status)}${director?`<select data-fine-status="${esc(fine.id)}" aria-label="Estado de la multa">
+      ${['Pendiente','Pagada','Anulada','Pendiente de decisión','Resuelta'].map(status=>`<option ${status===fine.status?'selected':''}>${status}</option>`).join('')}
+    </select>`:''}</td></tr>`).join('')}</tbody></table></div>`:
+    `<div class="card">${personal?'No tienes multas registradas.':'No hay multas registradas.'}</div>`}`;
+ c.querySelectorAll('[data-fine-status]').forEach(select=>select.onchange=async()=>{
+  try{
+   await api('/fines/'+select.dataset.fineStatus+'/status','POST',{status:select.value});
+   message('Estado actualizado.');
+  }catch(error){message(error.message);}
+ });
+ bindForm('fine',async(_,data)=>{
+  data.type=Number(data.type);
+  await api('/fines','POST',data);
+  await navigate('fines');
+ });
+}
 async function photosPage(c){const d=await api('/media/roster');c.innerHTML='<h1>Fotos autorizadas</h1><div class="note">Medio cuerpo y en bicicleta. Solo se muestran corredores con autorización de imagen registrada.</div>';for(const r of d.riders){const node=document.createElement('div');node.className='card';node.innerHTML='<h2>'+esc(r.name)+'</h2>'+(r.photos.map(f=>`<p>${esc(f.kind==='portrait'?'Medio cuerpo':'En bicicleta')} · <a href="/api/file/${f.id}">Descargar foto</a></p>`).join('')||'<p>Sin fotos registradas.</p>')+(['director','communication'].includes(me.role)?`<form method="post" data-photo-upload="${r.id}">${select('Tipo de foto','kind',[['portrait','Medio cuerpo'],['action','En bicicleta']])}<label>Foto JPG/PNG · máximo 3 MB<input type="file" name="file" accept="image/jpeg,image/png" required></label><button type="submit">Guardar foto</button></form>`:'');c.appendChild(node);}if(!d.riders.length)c.insertAdjacentHTML('beforeend','<div class="card">Sin corredores con autorización registrada todavía.</div>');c.querySelectorAll('[data-photo-upload]').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{await api('/documents/'+f.dataset.photoUpload,'POST',new FormData(f));await photosPage(c);message('Foto guardada en la ficha del corredor.');}catch(err){message(err.message);}});}
 async function init(){try{const fragment=new URLSearchParams(location.hash.slice(1));const token=fragment.get('activar');const data=await api('/me');me=data.user;csrf=data.csrf||'';if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}page='home';await navigate(page);}catch(e){login();message(e.message);}}
 init();
