@@ -113,10 +113,11 @@ function riderCalendar(c,events){
  c.innerHTML=`<h1>Calendario del equipo</h1>
   <p>Responde Disponible o No disponible en cada carrera y concentración. Dirección podrá convocarte cuando hayas indicado Disponible.</p>
   <p id="riderAvailabilityPending" role="status"></p>
-  <details class="card"><summary>Exportar a mi calendario</summary>
+  <details class="card"><summary>Exportar calendario</summary>
    <form method="get" action="/api/calendar.ics" class="toolbar">
     ${select('Calendario que quieres descargar','scope',[['all','Todo el calendario del equipo'],['selected','Mi calendario · preconvocatorias y convocatorias']])}
     <button type="submit">Descargar para Google Calendar, iPhone u Outlook</button>
+    <button type="submit" formaction="/api/calendar.pdf">Descargar PDF · listado por meses</button>
    </form><small>Se descargan las actividades con fecha, incluidos todos los días de las vueltas y concentraciones. Importa el archivo .ics en tu aplicación de calendario. Es una copia de los datos actuales.</small>
   </details>
   <div class="toolbar">
@@ -307,7 +308,7 @@ async function calendarPage(c,selectedId){
   const unscheduled=rows.filter(e=>!activityMonth(e));
   const title=page==='mine'?(me.role==='technician'?'Mi disponibilidad':'Mi calendario'):'Calendario del equipo';
   c.innerHTML=`<h1>${title}</h1>
-    ${director?'<a class="button" href="/api/calendar.ics?scope=all">Exportar calendario del equipo</a>':''}
+    ${director?'<details class="card"><summary>Exportar calendario</summary><div class="toolbar"><a class="button" href="/api/calendar.ics?scope=all">Google Calendar, iPhone u Outlook</a><a class="button" href="/api/calendar.pdf?scope=all">Descargar PDF · listado por meses</a></div></details>':''}
     <details class="card"><summary>Buscar y ver todas las actividades · ${rows.length}</summary>
       <label>Nombre de la prueba o actividad<input id="calendarSearch" type="search" placeholder="Ej. Guadiana"></label>
       <div id="calendarSearchResults">${sortActivities(rows).map(e=>`<div data-search-name="${esc(e.name)}">${activity(e)}<small>${esc(activityDateLabel(e))}${director?` · ${e.callStatus==='Publicada'?'Publicada':'Borrador'} · ${(e.called||[]).length} seleccionados`:''}</small></div>`).join('')}

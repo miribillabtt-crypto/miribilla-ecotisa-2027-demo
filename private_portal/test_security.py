@@ -278,6 +278,19 @@ def test_private_team_and_rider_calendar_exports(env):
  assert 'Preconvocado' not in updated and 'Convocado' in updated
  old_uid=next(line for line in personal.split('\r\n') if line.startswith('UID:'))
  assert old_uid in updated
+ from pypdf import PdfReader
+ url='/api/calendar.pdf'
+ assert app.test_client().get(url).status_code==401
+ assert director.get(url+'?scope=selected').status_code==403
+ assert runner.get(url+'?scope=invalid').status_code==400
+ exported=runner.get(url)
+ assert exported.mimetype=='application/pdf' and exported.headers['Cache-Control']=='no-store'
+ text='\n'.join(page.extract_text() for page in PdfReader(io.BytesIO(exported.data)).pages)
+ assert 'Febrero 2027' in text and 'Marzo 2027' in text and 'Abril 2027' in text
+ assert '27/02/2027' in text and '01/03/2027' in text and 'Sin fecha' in text
+ personal='\n'.join(page.extract_text() for page in PdfReader(io.BytesIO(runner.get(url+'?scope=selected').data)).pages)
+ assert 'Otra carrera' not in personal and 'Convocado' in personal
+ assert 'No hay actividades' in PdfReader(io.BytesIO(other.get(url+'?scope=selected').data)).pages[0].extract_text()
 
 def test_runner_only_reads_own_fines(env):
  _,ids,login,_=env

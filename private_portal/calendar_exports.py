@@ -29,6 +29,21 @@ def fold_line(line):
 
 
 def register_calendar_exports(app, Record, unseal, audit, require):
+    @app.get('/api/calendar.pdf')
+    @require('director', 'runner')
+    def calendar_pdf_export():
+        from calendar_pdf import calendar_pdf
+        scope = request.args.get('scope', 'all')
+        if scope not in ('all', 'selected'):
+            abort(400, 'Selecciona el calendario del equipo o el personal')
+        if scope == 'selected' and g.user.role != 'runner':
+            abort(403)
+        events = [unseal(row.data) for row in g.db.scalars(select(Record).where(Record.kind == 'event'))]
+        payload = calendar_pdf(events, personal=scope == 'selected', runner_id=g.user.id if g.user.role == 'runner' else None)
+        audit('calendar_pdf_exported', scope)
+        filename = 'Mi_calendario_por_meses.pdf' if scope == 'selected' else 'Calendario_equipo_por_meses.pdf'
+        return Response(payload, content_type='application/pdf', headers={'Content-Disposition': f'attachment; filename="{filename}"'})
+
     @app.get('/api/calendar.ics')
     @require('director', 'runner')
     def calendar_export():
