@@ -34,7 +34,7 @@ function directionSubnav(sections){
  const [title,items]=section;
  return `<div class="section-navigation"><strong>${title}</strong><div class="section-links" aria-label="Apartados de ${title}">${items.map(([id,label])=>`<button type="button" data-page="${id}" ${page===id?'aria-current="page" class="active"':''}>${label}</button>`).join('')}</div></div>`;
 }
-function shell(){const mobile=window.matchMedia?.('(max-width: 800px)').matches;const sections=me.role==='director'?directionSections():null;let groups=[];if(me.role==='runner')groups=[['Mi área',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi calendario'],['calls','Mis convocatorias'],['planning','Mi planning'],['profile','Mis datos y documentos'],['results','Mis resultados'],['days','Mis días de actividad'],['charges','Mis gastos y recibos'],['shop','Tienda'],['fines','Mis multas'],['publications','Mis publicaciones']]]];else if(me.role==='technician')groups=[['Área técnica',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi disponibilidad'],['calls','Convocatorias'],['planning','Planning y medios'],['resources','Técnicos y vehículos'],['equipment','Material y medidas'],['results','Resultados'],['days','Días de actividad']]]];else groups=[['Comunicación',[['home','Inicio'],['publications','Generar publicaciones'],['photos','Fotos autorizadas']]]];app.innerHTML=`<div class="portal-layout"><aside><div class="identity"><strong>${esc(me.name)}</strong><small>${esc(roles[me.role])}</small></div><button type="button" id="mobileMenu" aria-expanded="false" aria-controls="portalNavigation">☰ Menú</button><div id="portalNavigation"><nav aria-label="Menú del portal">${sections?directionNavigation(sections):groups.map(([title,items])=>`<details ${!mobile||items.some(([id])=>id===page)?'open':''}><summary>${title}</summary>${items.map(([id,label])=>`<button data-page="${id}" ${page===id?'aria-current="page"':''} class="${page===id?'active':''}">${label}</button>`).join('')}</details>`).join('')}</nav><button id="logout">Cerrar sesión</button></div></aside>
+function shell(){const mobile=window.matchMedia?.('(max-width: 800px)').matches;const sections=me.role==='director'?directionSections():null;let groups=[];if(me.role==='runner')groups=[['Mi área',[['home','Inicio'],['calendar','Calendario del equipo'],['calls','Mis convocatorias'],['planning','Mi planning'],['profile','Mis datos y documentos'],['results','Mis resultados'],['days','Mis días de actividad'],['charges','Mis gastos y recibos'],['shop','Tienda'],['fines','Mis multas'],['publications','Mis publicaciones']]]];else if(me.role==='technician')groups=[['Área técnica',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi disponibilidad'],['calls','Convocatorias'],['planning','Planning y medios'],['resources','Técnicos y vehículos'],['equipment','Material y medidas'],['results','Resultados'],['days','Días de actividad']]]];else groups=[['Comunicación',[['home','Inicio'],['publications','Generar publicaciones'],['photos','Fotos autorizadas']]]];app.innerHTML=`<div class="portal-layout"><aside><div class="identity"><strong>${esc(me.name)}</strong><small>${esc(roles[me.role])}</small></div><button type="button" id="mobileMenu" aria-expanded="false" aria-controls="portalNavigation">☰ Menú</button><div id="portalNavigation"><nav aria-label="Menú del portal">${sections?directionNavigation(sections):groups.map(([title,items])=>`<details ${!mobile||items.some(([id])=>id===page)?'open':''}><summary>${title}</summary>${items.map(([id,label])=>`<button data-page="${id}" ${page===id?'aria-current="page"':''} class="${page===id?'active':''}">${label}</button>`).join('')}</details>`).join('')}</nav><button id="logout">Cerrar sesión</button></div></aside>
 ${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Subir factura</button><input type="file" id="mobileInvoiceCamera" accept="image/*" capture="environment" hidden>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
 menu.onclick=()=>{
  const expanded=menu.getAttribute('aria-expanded')==='true';
@@ -51,7 +51,7 @@ if(quick){
  };
 }
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>navigate(b.dataset.page));return document.getElementById('content');}
-async function navigate(next){page=me.role==='director'&&['calls','planning'].includes(next)?'calendar':next;message('');const content=shell();if(window.matchMedia?.('(max-width: 800px)').matches)window.scrollTo(0,0);try{if(page==='home'){await dashboardPage(content);}else if(featureViews[page]){await featureViews[page](content);}else if(page==='users'){await usersPage(content);addBulkUserImport(content);}else if(page==='calendar'||page==='mine')await calendarPage(content);else if(page==='profile')await profilePage(content,me.id);else if(page==='roster')await rosterPage(content);else if(page==='clothes')await clothesPage(content);else if(page==='fines')await finesPage(content);else if(page==='photos')await photosPage(content);else if(page==='audit'){const d=await api('/audit');content.innerHTML='<h1>Registro de accesos y cambios</h1><div class="card scroll"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Referencia</th></tr></thead><tbody>'+d.entries.map(r=>`<tr><td>${esc(new Date(r.at*1000).toLocaleString('es-ES'))}</td><td>${esc(r.action)}</td><td>${esc(r.user||'Acceso no identificado')}</td><td>${esc(r.target)}</td></tr>`).join('')+'</tbody></table></div>';}}catch(e){message(e.message);}}
+async function navigate(next){page=(me.role==='director'&&['calls','planning'].includes(next))||(me.role==='runner'&&next==='mine')?'calendar':next;message('');const content=shell();if(window.matchMedia?.('(max-width: 800px)').matches)window.scrollTo(0,0);try{if(page==='home'){await dashboardPage(content);}else if(featureViews[page]){await featureViews[page](content);}else if(page==='users'){await usersPage(content);addBulkUserImport(content);}else if(page==='calendar'||page==='mine')await calendarPage(content);else if(page==='profile')await profilePage(content,me.id);else if(page==='roster')await rosterPage(content);else if(page==='clothes')await clothesPage(content);else if(page==='fines')await finesPage(content);else if(page==='photos')await photosPage(content);else if(page==='audit'){const d=await api('/audit');content.innerHTML='<h1>Registro de accesos y cambios</h1><div class="card scroll"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Referencia</th></tr></thead><tbody>'+d.entries.map(r=>`<tr><td>${esc(new Date(r.at*1000).toLocaleString('es-ES'))}</td><td>${esc(r.action)}</td><td>${esc(r.user||'Acceso no identificado')}</td><td>${esc(r.target)}</td></tr>`).join('')+'</tbody></table></div>';}}catch(e){message(e.message);}}
 function inviteLink(token){return location.origin+'/#activar='+encodeURIComponent(token);}
 async function usersPage(c){const d=await api('/users');users=d.users;c.innerHTML=`<h1>Usuarios del equipo</h1>${me.owner?`<details class="card"><summary>Invitar por correo</summary><p>Para crear una ficha de corredor o técnico, usa Equipo o Técnicos y vehículos.</p><form method="post" id="invite"><div class="grid">${field('Nombre y apellidos','name')}${field('Correo de acceso','email','email')}${select('Perfil','role',Object.entries(roles))}</div><label>Permitir consulta de DNI, SEPA y documentos privados (solo Dirección)<input type="checkbox" name="documents"></label><button type="submit" class="primary">Crear invitación</button><div id="inviteResult" aria-live="polite"></div></form></details>`:''}<div class="card scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Acceso</th><th></th></tr></thead><tbody>${users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${esc(roles[u.role])}${u.documents?' · Documentos':''}</td><td>${u.active?(u.accountReady?'Activo':'Sin acceso'):'Desactivado'}${me.owner&&!u.active?` <button data-restore-user="${u.id}">Restaurar acceso</button>`:''}</td><td>${me.owner&&u.active?`${u.accountReady?`<button data-reset="${u.id}">Restablecer acceso</button> `:''}${!u.owner?`<button data-disable="${u.id}">Desactivar</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`;c.querySelectorAll('[data-restore-user]').forEach(b=>b.onclick=async()=>{try{await api('/users/'+b.dataset.restoreUser+'/restore','POST',{});await navigate('users');}catch(e){message(e.message);}});bindForm('invite',async(f,data)=>{data.documents=f.elements.documents.checked;const result=await api('/invites','POST',data);document.getElementById('inviteResult').innerHTML=`<div class="note"><strong>Invitación creada · caduca en 48 horas</strong><p>Entrega este enlace únicamente a la persona indicada:</p><p class="secret">${esc(inviteLink(result.token))}</p><small>No se ha enviado ningún correo.</small></div>`;});c.querySelectorAll('[data-disable]').forEach(b=>b.onclick=async()=>{if(confirm('¿Desactivar este usuario y cerrar sus sesiones?')){try{await api('/users/'+b.dataset.disable+'/disable','POST',{});await navigate('users');}catch(e){message(e.message);}}});c.querySelectorAll('[data-reset]').forEach(b=>b.onclick=async()=>{if(!confirm('Se cerrarán sus sesiones y se generará un nuevo enlace de activación. ¿Continuar?'))return;try{const r=await api('/users/'+b.dataset.reset+'/reset','POST',{});message('Enlace de recuperación (1 hora): '+inviteLink(r.token));}catch(e){message(e.message);}});}
 const calendarMonths=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -75,13 +75,58 @@ function bindNameSearch(input,container){
   input.oninput();
 }
 
+function riderCallState(event){
+ if(!(event.called||[]).includes(me.id))return {label:'No convocado',style:'pending'};
+ return event.callStatus==='Publicada'?{label:'Convocado',style:'available'}:{label:'Preconvocado',style:'assigned'};
+}
+function riderCalendar(c,events){
+ const sorted=sortActivities(events);
+ c.innerHTML=`<h1>Calendario del equipo</h1>
+  <p>Todas las actividades del equipo. Preconvocado significa que Dirección te ha seleccionado y la convocatoria sigue en borrador.</p>
+  <div class="toolbar">
+   <label>Buscar actividad<input id="riderCalendarSearch" type="search" placeholder="Nombre o lugar"></label>
+   <label>Mes (opcional)<input name="calendarMonth" type="month"></label>
+   ${select('Mi convocatoria','callState',['Todas','Convocado','Preconvocado','No convocado'])}
+   <button type="button" id="riderCalendarAll">Ver todo</button>
+  </div><div id="riderAgenda" class="rider-agenda"></div>`;
+ const search=c.querySelector('#riderCalendarSearch');
+ const month=c.querySelector('[name=calendarMonth]');
+ const status=c.querySelector('[name=callState]');
+ const render=()=>{
+  const normalize=value=>value.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLocaleLowerCase('es');
+  const query=normalize(search.value.trim());
+  const rows=sorted.filter(event=>
+   normalize(event.name+' '+(event.place||'')).includes(query)&&
+   (!month.value||activityMonth(event)===month.value||(event.date<month.value+'-01'&&event.endDate>=month.value+'-01'))&&
+   (status.value==='Todas'||riderCallState(event).label===status.value));
+  let previousMonth;
+  c.querySelector('#riderAgenda').innerHTML=rows.map(event=>{
+   const group=activityMonth(event);
+   const heading=group!==previousMonth?`<h2>${group?calendarMonths[Number(group.slice(5))-1]+' '+group.slice(0,4):'Fecha por confirmar'}</h2>`:'';
+   previousMonth=group;
+   const state=riderCallState(event);
+   return `${heading}<article class="card agenda-activity">
+    <div><strong>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</strong>
+     <small>${esc(event.place||'Lugar por confirmar')}</small></div>
+    <button type="button" class="agenda-open" data-calendar-event="${esc(event.id)}">
+     <strong>${esc(event.name)}</strong><span class="resource-state ${state.style}">${state.label}</span>
+    </button><small>Mi disponibilidad · ${esc(event.myStatus||'Por confirmar')}</small>
+   </article>`;
+  }).join('')||'<div class="card">No hay actividades que coincidan con estos filtros.</div>';
+  c.querySelectorAll('[data-calendar-event]').forEach(button=>button.onclick=()=>calendarPage(c,button.dataset.calendarEvent).catch(error=>message(error.message)));
+ };
+ search.oninput=render;month.onchange=render;status.onchange=render;
+ c.querySelector('#riderCalendarAll').onclick=()=>{search.value='';month.value='';status.value='Todas';render();};
+ render();
+}
 async function calendarPage(c,selectedId){
   const director=me.role==='director';
   const availableRole=['runner','technician'].includes(me.role);
   const {events}=await api('/events');
-  const personal=page==='mine'&&me.role==='runner';
+  const runner=me.role==='runner';
   const calledForMe=e=>e.callStatus==='Publicada'&&(e.called||[]).includes(me.id);
-  const rows=personal?events.filter(e=>e.myStatus==='Disponible'||calledForMe(e)):events;
+  const rows=events;
+  if(runner&&!selectedId){riderCalendar(c,events);return;}
   if(!calendarMonth){
     const now=calendarDateKey(new Date()).slice(0,7);
     const months=rows.map(activityMonth).filter(Boolean).sort();
@@ -100,7 +145,7 @@ async function calendarPage(c,selectedId){
       ${event.status?`<p class="pill">${esc(event.status)}</p>`:''}
       ${event.owner?`<p>Responsable: ${esc(event.owner)}</p>`:''}
       ${event.notes?`<p class="event-notes">${esc(event.notes)}</p>`:''}
-      ${availableRole?`${select('Mi disponibilidad','status',['Por confirmar','Disponible','No disponible'],event.myStatus)}<p>${called.includes(me.id)&&event.callStatus==='Publicada'?'Convocado por Dirección':'Sin convocatoria personal'}</p>`:''}
+      ${availableRole?`${runner?`<p class="resource-state ${riderCallState(event).style}">${riderCallState(event).label}</p>`:''}${select('Mi disponibilidad','status',['Por confirmar','Disponible','No disponible'],event.myStatus)}`:''}
       ${director?'<button type="button" id="editCalendarEvent">Editar prueba o actividad</button>':''}
       </article>
       ${director?`<div class="section-links activity-sections" role="group" aria-label="Ficha de la actividad">
@@ -209,7 +254,6 @@ async function calendarPage(c,selectedId){
   const unscheduled=rows.filter(e=>!activityMonth(e));
   const title=page==='mine'?(me.role==='technician'?'Mi disponibilidad':'Mi calendario'):'Calendario del equipo';
   c.innerHTML=`<h1>${title}</h1>
-    ${personal?`<section class="card"><h2>Mis convocatorias publicadas</h2>${sortActivities(rows.filter(calledForMe)).map(e=>`<div><small>${esc(activityDateLabel(e))}</small>${activity(e)}</div>`).join('')||'<p>Aún no tienes convocatorias publicadas.</p>'}</section>`:''}
     <details class="card"><summary>Buscar y ver todas las actividades · ${rows.length}</summary>
       <label>Nombre de la prueba o actividad<input id="calendarSearch" type="search" placeholder="Ej. Guadiana"></label>
       <div id="calendarSearchResults">${sortActivities(rows).map(e=>`<div data-search-name="${esc(e.name)}">${activity(e)}<small>${esc(activityDateLabel(e))}${director?` · ${e.callStatus==='Publicada'?'Publicada':'Borrador'} · ${(e.called||[]).length} seleccionados`:''}</small></div>`).join('')}

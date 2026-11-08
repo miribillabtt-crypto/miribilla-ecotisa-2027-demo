@@ -21,6 +21,11 @@
 .section-navigation>strong{display:block;color:#465e72;margin-bottom:8px}
 .section-links{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .activity-sections{margin:14px 0}
+.rider-agenda h2{margin-top:24px}
+.agenda-activity{display:grid;grid-template-columns:190px minmax(0,1fr);gap:8px 18px}
+.agenda-open{display:flex;align-items:center;justify-content:space-between;gap:12px;text-align:left;flex-wrap:wrap}
+.agenda-activity>small{grid-column:1/-1}
+@media(max-width:680px){.agenda-activity{grid-template-columns:1fr}.agenda-open{width:100%}}
 
 #mobileMenu,.mobile-actions,.mobile-agenda{display:none}
 @media(max-width:800px){
