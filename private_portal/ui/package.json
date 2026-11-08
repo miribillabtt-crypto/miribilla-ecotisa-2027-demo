@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@uppy/core": "^4.5.2",
+    "@uppy/xhr-upload": "^4.3.3",
+    "esbuild": "^0.25.5",
+    "tabulator-tables": "^6.3.1"
+  },
+  "private": true,
+  "scripts": {
+    "build": "esbuild upload-entry.js --bundle --minify --target=es2020 --outfile=../static/vendor/upload.js && esbuild table-entry.js --bundle --minify --target=es2020 --outfile=../static/vendor/table.js"
+  }
+}
