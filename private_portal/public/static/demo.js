@@ -113,6 +113,22 @@ window.DemoPortal=(()=>{
    }
    if(path==='/shop')return copy({products:garments.map(name=>({name,price:2000})),orders:state.orders.filter(order=>role!=='runner'||order.rider===user.id),director:'demo-director',directors:[people[0]]});
    if(path==='/fines')return copy({fines:state.fines.filter(fine=>role!=='runner'||fine.user===user.id)});
+   if(path==='/accounts'){
+    const riders=people.filter(person=>person.role==='runner'&&(role!=='runner'||person.id===user.id)).map(person=>{
+     const row={id:person.id,name:person.name,clothes:0,races:0,fines:0,other:0,total:0,paid:0,pending:0};
+     for(const charge of state.modules.charge.filter(item=>item.rider===person.id&&item.status!=='Anulado')){
+      row[charge.concept?.includes('ropa')?'clothes':charge.event?'races':'other']+=charge.amount;
+      row.total+=charge.amount;row[charge.status==='Pagado'?'paid':'pending']+=charge.amount;
+     }
+     for(const fine of state.fines.filter(item=>item.user===person.id&&item.status!=='Anulada')){
+      if(typeof fine.amount!=='number')continue;
+      row.fines+=fine.amount*100;row.total+=fine.amount*100;row[fine.status==='Pagada'?'paid':'pending']+=fine.amount*100;
+     }
+     return row;
+    });
+    const totals=Object.fromEntries(['clothes','races','fines','other','total','paid','pending'].map(field=>[field,riders.reduce((sum,row)=>sum+row[field],0)]));
+    return {riders,totals};
+   }
    if(path==='/audit')return {entries:[]};
    if(path==='/archive'||path==='/resource-availability')return {records:[]};
    if(path==='/bank/reconciliation')return {movements:[]};
@@ -147,7 +163,9 @@ window.DemoPortal=(()=>{
    const previous=state.orders.find(order=>order.token===data.token);
    if(previous)return copy(previous);
    const order={...data,id:id(),rider:user.id,name:user.name,created:new Date().toISOString(),paymentStatus:'Pendiente',emailStatus:'Demostración',items:data.items.map(item=>({...item,price:2000}))};
-   state.orders.push(order);return copy(order);
+   state.orders.push(order);
+   state.modules.charge.push({id:id(),rider:user.id,event:'',concept:'Compra de ropa',amount:order.amount,status:'Pendiente',notes:'Pedido '+order.id});
+   return copy(order);
   }
   if(path==='/fines'){state.fines.push({id:id(),user:data.user,reason:'Multa de demostración',amount:5,date:'2027-02-27',status:'Pendiente'});return {ok:true};}
   if(parts[0]==='fines'){Object.assign(state.fines.find(fine=>fine.id===parts[1]),data);return {ok:true};}

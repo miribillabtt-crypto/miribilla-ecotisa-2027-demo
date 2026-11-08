@@ -31,7 +31,7 @@ def test_direction_creates_events_with_optional_end_date(env):
  director,h=login('director')
  runner,rh=login('runner')
  path='/api/events'
- event={'name':'Vuelta de prueba','date':'2027-02-27','endDate':'2027-03-01'}
+ event={'name':'Vuelta de prueba','date':'2027-02-27','endDate':'2027-03-01','category':'Carrera','type':'Vueltas'}
  assert runner.post(path,json=event,headers=rh).status_code==403
  assert director.post(path,json={**event,'date':''},headers=h).status_code==400
  assert director.post(path,json={**event,'endDate':'2027-02-26'},headers=h).status_code==400
@@ -41,7 +41,45 @@ def test_direction_creates_events_with_optional_end_date(env):
  events={row['name']:row for row in director.get(path).json['events']}
  assert events[event['name']]['date']==event['date']
  assert events[event['name']]['endDate']==event['endDate']
+ assert events[event['name']]['category']=='Carrera' and events[event['name']]['type']=='Vueltas'
  assert events['Prueba de un día']['endDate']==''
+ assert director.post(path,json={'name':'Concentración','category':'Concentración','type':'Otras'},headers=h).status_code==200
+ camp=next(row for row in director.get(path).json['events'] if row['name']=='Concentración')
+ assert camp['category']=='Concentración' and camp['type']==''
+ assert director.post(path+'/'+camp['id']+'/details',json={'category':'Carrera','type':'Copa de España'},headers=h).status_code==200
+ assert next(row for row in director.get(path).json['events'] if row['id']==camp['id'])['type']=='Copa de España'
+ assert director.post(path+'/'+camp['id']+'/details',json={'date':'2027-03-05','endDate':'2027-03-04'},headers=h).status_code==400
+
+def test_account_totals_include_clothing_races_and_fines(env):
+ app,ids,login,_=env
+ director,h=login('director')
+ runner,_=login('runner')
+ other,_=login('runner2')
+ technician,_=login('technician')
+ assert app.test_client().get('/api/accounts').status_code==401
+ assert technician.get('/api/accounts').status_code==403
+ assert director.post('/api/events',json={'name':'Carrera de prueba'},headers=h).status_code==200
+ event=director.get('/api/events').json['events'][0]['id']
+ for data in [
+  dict(rider=ids['runner'],concept='Compra de ropa',amount=2000,status='Pendiente'),
+  dict(rider=ids['runner'],event=event,concept='Desplazamiento',amount=3500,status='Pagado'),
+  dict(rider=ids['runner'],concept='Compra de ropa anulada',amount=9900,status='Anulado')]:
+  assert director.post('/api/modules/charge',json=data,headers=h).status_code==200
+ assert director.post('/api/fines',json={'user':ids['runner'],'type':0},headers=h).status_code==200
+ summary=director.get('/api/accounts').json
+ row=next(row for row in summary['riders'] if row['id']==ids['runner'])
+ assert [row[key] for key in ('clothes','races','fines','total','paid','pending')]==[2000,3500,500,6000,3500,2500]
+ assert len(runner.get('/api/accounts').json['riders'])==1
+ assert runner.get('/api/accounts').json['totals']['total']==6000
+ assert other.get('/api/accounts').json['totals']['total']==0
+ fine=director.get('/api/fines').json['fines'][0]
+ assert director.post('/api/fines/'+fine['id']+'/status',json={'status':'Pagada'},headers=h).status_code==200
+ assert runner.get('/api/accounts').json['totals']['paid']==4000
+ from openpyxl import load_workbook
+ exported=runner.get('/api/accounts/export')
+ assert exported.status_code==200 and exported.headers['Cache-Control']=='no-store'
+ workbook=load_workbook(io.BytesIO(exported.data))
+ assert list(workbook.active.values)[1][1:]==(20,35,5,0,60,40,20)
 
 def test_direction_provisions_linked_technician_accounts(env):
  app,_,login,_=env

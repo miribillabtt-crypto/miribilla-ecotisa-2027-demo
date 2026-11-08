@@ -404,6 +404,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    if k=='callStatus' and v not in ['Borrador','Publicada']:abort(400)
    out[k]=v
   if not out.get('name'):abort(400)
+  if {'date','endDate'}.intersection(d) and out.get('endDate') and (not out.get('date') or out['endDate']<out['date']):
+   abort(400,'La fecha de fin debe ser igual o posterior a la de inicio')
   if d.get('callStatus')=='Publicada':
    if not out.get('called'):abort(400,'Selecciona corredores antes de publicar')
    for rid in out['called']:

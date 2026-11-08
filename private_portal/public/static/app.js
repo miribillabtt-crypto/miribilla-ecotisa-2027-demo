@@ -59,6 +59,27 @@ const calendarDateKey=date=>date.getFullYear()+'-'+String(date.getMonth()+1).pad
 let calendarMonth='';
 const activityMonth=event=>event.date?.slice(0,7)||(calendarMonths.includes(event.month)?'2027-'+String(calendarMonths.indexOf(event.month)+1).padStart(2,'0'):'');
 const activityDateLabel=event=>event.date||(activityMonth(event)?event.month+' · día por confirmar':'Fecha por confirmar');
+function activityClassification(event={}){
+ const category=event.category||'Carrera';
+ const categories=['Entrenamiento de equipo','Carrera','Concentración'];
+ if(!categories.includes(category))categories.push(category);
+ const types=[['','Seleccionar categoría'],'Euskaldun','Copa de España','Vueltas','Otras'];
+ if(event.type&&!types.includes(event.type))types.push(event.type);
+ return `${select('Tipo de actividad','category',categories,category)}
+  <div data-race-category>${select('Categoría de carrera','type',types,event.type||'')}</div>`;
+}
+function bindActivityClassification(form){
+ const category=form.elements.category;
+ const type=form.elements.type;
+ const update=()=>{
+  const race=category.value==='Carrera';
+  form.querySelector('[data-race-category]').hidden=!race;
+  type.disabled=!race;type.required=race;
+ };
+ category.onchange=update;
+ form.elements.name.required=true;
+ update();
+}
 function sortActivities(events){
   const key=event=>event.date||(activityMonth(event)?activityMonth(event)+'-00':'9999-99-99');
   return [...events].sort((a,b)=>key(a).localeCompare(key(b))||a.name.localeCompare(b.name,'es')||a.id.localeCompare(b.id));
@@ -173,6 +194,7 @@ async function calendarPage(c,selectedId){
     c.innerHTML=`<button type="button" id="backCalendar">Volver al calendario</button>
       <article class="card"><h1>${esc(event.name)}</h1>
       <p>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''} · ${esc(event.place||'Lugar por confirmar')}</p>
+      ${event.category?`<p class="pill">${esc(event.category)}${event.type?' · '+esc(event.type):''}</p>`:''}
       ${event.status?`<p class="pill">${esc(event.status)}</p>`:''}
       ${event.owner?`<p>Responsable: ${esc(event.owner)}</p>`:''}
       ${event.notes?`<p class="event-notes">${esc(event.notes)}</p>`:''}
@@ -298,7 +320,7 @@ async function calendarPage(c,selectedId){
     </div>
     ${director?`<p>Pulsa un día del calendario para crear una carrera o actividad en esa fecha.</p>
     <details class="card"><summary>Nueva carrera o actividad</summary><form method="post" id="event">
-      <div class="grid">${field('Actividad','name')}${field('Lugar','place')}${field('Fecha de inicio','date','date')}${field('Fecha de fin (opcional)','endDate','date')}</div>
+      <div class="grid">${activityClassification()}${field('Nombre de la actividad','name')}${field('Lugar','place')}${field('Fecha de inicio','date','date')}${field('Fecha de fin (opcional)','endDate','date')}</div>
       <small>Para una carrera de un solo día, deja vacía la fecha de fin.</small>
       <button type="submit" class="primary">Crear actividad</button></form></details>`:''}
     <div class="calendar-scroll${director?' calendar-date-picker':''}"><div class="calendar-grid" aria-label="${calendarMonths[month-1]} ${year}">
@@ -322,6 +344,7 @@ async function calendarPage(c,selectedId){
   c.querySelectorAll('[data-calendar-event]').forEach(button=>button.onclick=()=>calendarPage(c,button.dataset.calendarEvent).catch(err=>message(err.message)));
   const createForm=c.querySelector('#event');
   if(createForm){
+    bindActivityClassification(createForm);
     const {date,endDate}=createForm.elements;
     const updateDateRange=()=>{endDate.min=date.value;};
     date.oninput=updateDateRange;

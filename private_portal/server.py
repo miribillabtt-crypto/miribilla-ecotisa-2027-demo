@@ -541,6 +541,10 @@ def create_app(test_config=None):
     def new_event():
         d=body();name=text(d,'name',150);date=text(d,'date',10);place=text(d,'place',150)
         end_date=text(d,'endDate',10)
+        category=text(d,'category',60) or 'Carrera'
+        race_type=text(d,'type',80) if category=='Carrera' else ''
+        if category not in ('Carrera','Concentración','Entrenamiento de equipo'):abort(400,'Selecciona el tipo de actividad')
+        if race_type and race_type not in ('Euskaldun','Copa de España','Vueltas','Otras'):abort(400,'Selecciona la categoría de carrera')
         if not name:abort(400,'Indica el nombre')
         try:
             if date:date=datetime.date.fromisoformat(date).isoformat()
@@ -548,7 +552,7 @@ def create_app(test_config=None):
         except ValueError:abort(400,'Revisa las fechas de la actividad')
         if end_date and (not date or end_date<date):
             abort(400,'La fecha de fin requiere una fecha de inicio y debe ser igual o posterior')
-        r=Record(kind='event',owner_id=g.user.id,data=seal(dict(name=name,date=date,endDate=end_date,place=place,called=[])));g.db.add(r);audit('event_created');return jsonify(ok=True)
+        r=Record(kind='event',owner_id=g.user.id,data=seal(dict(name=name,date=date,endDate=end_date,place=place,category=category,type=race_type,called=[])));g.db.add(r);audit('event_created');return jsonify(ok=True)
     @app.post('/api/events/<event_id>/availability')
     @require('runner','technician')
     def availability(event_id):
@@ -693,6 +697,8 @@ def create_app(test_config=None):
         seed_calendar(Sessions,Record,cipher)
     from settlements import register_settlements
     register_settlements(app,Record,User,CLOTHES,seal,unseal,audit,require,body)
+    from account_summary import register_account_summary
+    register_account_summary(app,User,Record,unseal,audit,require)
     from resources import register_resources
     register_resources(app,Record,seal,unseal,audit,require,body)
     from modules import register_modules
