@@ -181,8 +181,49 @@ def test_clothes_export_defaults_and_registered_quantities(env):
 def test_call_requires_available_runner(env):
  app,ids,login,_=env;c,h=login('director');assert c.post('/api/events',json={'name':'Carrera','date':'2027-02-01','place':'Bilbao'},headers=h).status_code==200
  eid=c.get('/api/events').json['events'][0]['id'];assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==400
- r,rh=login('runner');assert r.post('/api/events/'+eid+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
+ r,rh=login('runner')
+ assert r.post('/api/events/'+eid+'/availability',json={'status':'Por confirmar'},headers=rh).status_code==400
+ assert r.post('/api/events/'+eid+'/availability',json={'status':'No disponible'},headers=rh).status_code==200
+ assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==400
+ assert r.post('/api/events/'+eid+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
  assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
+ assert c.get('/api/events').json['events'][0]['responses'][ids['runner']]=='Disponible'
+ assert r.post('/api/events/'+eid+'/availability',json={'status':'No disponible'},headers=rh).status_code==200
+ assert c.post('/api/events/'+eid+'/details',json={'callStatus':'Publicada'},headers=h).status_code==400
+
+def test_private_team_and_rider_calendar_exports(env):
+ app,ids,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ other,_=login('runner2')
+ name='Concentración, montaña; '+('Á' * 60)
+ for event in ({'name':name,'date':'2027-02-27','endDate':'2027-03-01'},
+               {'name':'Otra carrera','date':'2027-04-10'},{'name':'Sin fecha'}):
+  assert director.post('/api/events',json=event,headers=h).status_code==200
+ event=next(e for e in director.get('/api/events').json['events'] if e['name']==name)
+ path='/api/events/'+event['id']
+ assert runner.post(path+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
+ assert director.post(path+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
+ url='/api/calendar.ics'
+ assert app.test_client().get(url).status_code==401
+ assert director.get(url+'?scope=selected').status_code==403
+ assert runner.get(url+'?scope=invalid').status_code==400
+ exported=runner.get(url)
+ assert exported.mimetype=='text/calendar' and exported.headers['Cache-Control']=='no-store'
+ raw=exported.data
+ assert all(len(line)<=75 for line in raw.split(b'\r\n'))
+ unfolded=raw.decode().replace('\r\n ','')
+ assert unfolded.count('BEGIN:VEVENT')==2 and 'Sin fecha' not in unfolded
+ assert 'DTSTART;VALUE=DATE:20270227' in unfolded and 'DTEND;VALUE=DATE:20270302' in unfolded
+ assert 'Concentración\\, montaña\\;' in unfolded and 'Preconvocado' in unfolded
+ personal=runner.get(url+'?scope=selected').data.decode().replace('\r\n ','')
+ assert personal.count('BEGIN:VEVENT')==1 and 'Otra carrera' not in personal
+ assert 'BEGIN:VEVENT' not in other.get(url+'?scope=selected').text
+ assert director.post(path+'/details',json={'callStatus':'Publicada'},headers=h).status_code==200
+ updated=runner.get(url+'?scope=selected').data.decode().replace('\r\n ','')
+ assert 'Preconvocado' not in updated and 'Convocado' in updated
+ old_uid=next(line for line in personal.split('\r\n') if line.startswith('UID:'))
+ assert old_uid in updated
 
 def test_runner_only_reads_own_fines(env):
  _,ids,login,_=env

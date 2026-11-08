@@ -553,10 +553,11 @@ def create_app(test_config=None):
     @app.post('/api/events/<event_id>/availability')
     @require('runner','technician')
     def availability(event_id):
-        event=g.db.get(Record,event_id)
+        event=g.db.get(Record,event_id,with_for_update=True)
         if not event or event.kind!='event':abort(404)
         d=body();status=text(d,'status',30)
         if status not in ['Por confirmar','Disponible','No disponible']:abort(400)
+        if g.user.role=='runner' and status=='Por confirmar':abort(400,'Indica Disponible o No disponible')
         key=digest(event_id+':'+g.user.id);r=g.db.get(Record,key)
         data=seal({'user':g.user.id,'status':status})
         if r:r.data=data
@@ -571,7 +572,7 @@ def create_app(test_config=None):
         if not isinstance(ids,list) or len(ids)>100:abort(400)
         for target in ids:
             u=g.db.get(User,target);a=g.db.get(Record,digest(event_id+':'+target))
-            if not u or not u.active or u.role!='runner' or not a or unseal(a.data)['status']!='Disponible':abort(400,'Solo corredores disponibles')
+            if not u or not u.active or u.role!='runner' or not a or unseal(a.data)['status']!='Disponible':abort(400,'El corredor debe indicar Disponible antes de convocarlo')
         data=unseal(r.data);data['called']=list(dict.fromkeys(ids));r.data=seal(data);audit('call_updated',event_id);return jsonify(ok=True)
     @app.get('/api/roster')
     @require()
@@ -683,6 +684,8 @@ def create_app(test_config=None):
     register_bank_reconciliation(app,Record,Document,seal,unseal,audit,require,body)
     from invoice_exports import register_invoice_exports
     register_invoice_exports(app,Record,Document,cipher,unseal,audit,require)
+    from calendar_exports import register_calendar_exports
+    register_calendar_exports(app,Record,unseal,audit,require)
     rider_accounts=os.environ.get('RIDER_ACCOUNT_SETUP')
     if not app.testing and rider_accounts and rider_accounts!='[]':
         from rider_accounts import provision_rider_accounts,verify_rider_accounts

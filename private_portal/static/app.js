@@ -79,26 +79,48 @@ function riderCallState(event){
  if(!(event.called||[]).includes(me.id))return {label:'No convocado',style:'pending'};
  return event.callStatus==='Publicada'?{label:'Convocado',style:'available'}:{label:'Preconvocado',style:'assigned'};
 }
+function riderAvailabilityInput(event){
+ const answered=['Disponible','No disponible'].includes(event.myStatus);
+ return `<label class="agenda-availability">${answered?'Mi disponibilidad':'Indica tu disponibilidad · pendiente'}
+  <select name="status" data-availability-event="${esc(event.id)}">
+   <option value="" disabled ${answered?'':'selected'}>Selecciona una respuesta</option>
+   ${['Disponible','No disponible'].map(status=>`<option ${event.myStatus===status?'selected':''}>${status}</option>`).join('')}
+  </select></label>`;
+}
 function riderCalendar(c,events){
  const sorted=sortActivities(events);
  c.innerHTML=`<h1>Calendario del equipo</h1>
-  <p>Todas las actividades del equipo. Preconvocado significa que Dirección te ha seleccionado y la convocatoria sigue en borrador.</p>
+  <p>Responde Disponible o No disponible en cada carrera y concentración. Dirección podrá convocarte cuando hayas indicado Disponible.</p>
+  <p id="riderAvailabilityPending" role="status"></p>
+  <details class="card"><summary>Exportar a mi calendario</summary>
+   <form method="get" action="/api/calendar.ics" class="toolbar">
+    ${select('Calendario que quieres descargar','scope',[['all','Todo el calendario del equipo'],['selected','Mi calendario · preconvocatorias y convocatorias']])}
+    <button type="submit">Descargar para Google Calendar, iPhone u Outlook</button>
+   </form><small>Se descargan las actividades con fecha, incluidos todos los días de las vueltas y concentraciones. Importa el archivo .ics en tu aplicación de calendario. Es una copia de los datos actuales.</small>
+  </details>
   <div class="toolbar">
    <label>Buscar actividad<input id="riderCalendarSearch" type="search" placeholder="Nombre o lugar"></label>
    <label>Mes (opcional)<input name="calendarMonth" type="month"></label>
    ${select('Mi convocatoria','callState',['Todas','Convocado','Preconvocado','No convocado'])}
+   ${select('Mi disponibilidad','availabilityFilter',['Todas','Pendiente de responder','Disponible','No disponible'])}
    <button type="button" id="riderCalendarAll">Ver todo</button>
   </div><div id="riderAgenda" class="rider-agenda"></div>`;
  const search=c.querySelector('#riderCalendarSearch');
  const month=c.querySelector('[name=calendarMonth]');
  const status=c.querySelector('[name=callState]');
+ const availability=c.querySelector('[name=availabilityFilter]');
  const render=()=>{
   const normalize=value=>value.normalize('NFD').replace(/\p{Diacritic}/gu,'').toLocaleLowerCase('es');
   const query=normalize(search.value.trim());
   const rows=sorted.filter(event=>
    normalize(event.name+' '+(event.place||'')).includes(query)&&
    (!month.value||activityMonth(event)===month.value||(event.date<month.value+'-01'&&event.endDate>=month.value+'-01'))&&
-   (status.value==='Todas'||riderCallState(event).label===status.value));
+   (status.value==='Todas'||riderCallState(event).label===status.value)&&
+   (availability.value==='Todas'||(availability.value==='Pendiente de responder'?
+    !['Disponible','No disponible'].includes(event.myStatus):event.myStatus===availability.value)));
+  const pending=sorted.filter(event=>!['Disponible','No disponible'].includes(event.myStatus)).length;
+  c.querySelector('#riderAvailabilityPending').textContent=pending?
+   `Tienes ${pending} ${pending===1?'actividad pendiente':'actividades pendientes'} de responder.`:'Has respondido a todas las actividades.';
   let previousMonth;
   c.querySelector('#riderAgenda').innerHTML=rows.map(event=>{
    const group=activityMonth(event);
@@ -110,13 +132,22 @@ function riderCalendar(c,events){
      <small>${esc(event.place||'Lugar por confirmar')}</small></div>
     <button type="button" class="agenda-open" data-calendar-event="${esc(event.id)}">
      <strong>${esc(event.name)}</strong><span class="resource-state ${state.style}">${state.label}</span>
-    </button><small>Mi disponibilidad · ${esc(event.myStatus||'Por confirmar')}</small>
+    </button>${riderAvailabilityInput(event)}
    </article>`;
   }).join('')||'<div class="card">No hay actividades que coincidan con estos filtros.</div>';
   c.querySelectorAll('[data-calendar-event]').forEach(button=>button.onclick=()=>calendarPage(c,button.dataset.calendarEvent).catch(error=>message(error.message)));
+  c.querySelectorAll('[data-availability-event]').forEach(input=>input.onchange=async()=>{
+   const event=sorted.find(activity=>activity.id===input.dataset.availabilityEvent);
+   input.disabled=true;
+   try{
+    await api('/events/'+encodeURIComponent(event.id)+'/availability','POST',{status:input.value});
+    event.myStatus=input.value;
+    if(c.isConnected){render();message('Disponibilidad guardada.');}
+   }catch(error){if(c.isConnected){render();message(error.message);}}
+  });
  };
- search.oninput=render;month.onchange=render;status.onchange=render;
- c.querySelector('#riderCalendarAll').onclick=()=>{search.value='';month.value='';status.value='Todas';render();};
+ search.oninput=render;month.onchange=render;status.onchange=render;availability.onchange=render;
+ c.querySelector('#riderCalendarAll').onclick=()=>{search.value='';month.value='';status.value='Todas';availability.value='Todas';render();};
  render();
 }
 async function calendarPage(c,selectedId){
@@ -145,7 +176,7 @@ async function calendarPage(c,selectedId){
       ${event.status?`<p class="pill">${esc(event.status)}</p>`:''}
       ${event.owner?`<p>Responsable: ${esc(event.owner)}</p>`:''}
       ${event.notes?`<p class="event-notes">${esc(event.notes)}</p>`:''}
-      ${availableRole?`${runner?`<p class="resource-state ${riderCallState(event).style}">${riderCallState(event).label}</p>`:''}${select('Mi disponibilidad','status',['Por confirmar','Disponible','No disponible'],event.myStatus)}`:''}
+      ${availableRole?`${runner?`<p class="resource-state ${riderCallState(event).style}">${riderCallState(event).label}</p>${riderAvailabilityInput(event)}`:select('Mi disponibilidad','status',['Por confirmar','Disponible','No disponible'],event.myStatus)}`:''}
       ${director?'<button type="button" id="editCalendarEvent">Editar prueba o actividad</button>':''}
       </article>
       ${director?`<div class="section-links activity-sections" role="group" aria-label="Ficha de la actividad">
@@ -254,6 +285,7 @@ async function calendarPage(c,selectedId){
   const unscheduled=rows.filter(e=>!activityMonth(e));
   const title=page==='mine'?(me.role==='technician'?'Mi disponibilidad':'Mi calendario'):'Calendario del equipo';
   c.innerHTML=`<h1>${title}</h1>
+    ${director?'<a class="button" href="/api/calendar.ics?scope=all">Exportar calendario del equipo</a>':''}
     <details class="card"><summary>Buscar y ver todas las actividades · ${rows.length}</summary>
       <label>Nombre de la prueba o actividad<input id="calendarSearch" type="search" placeholder="Ej. Guadiana"></label>
       <div id="calendarSearchResults">${sortActivities(rows).map(e=>`<div data-search-name="${esc(e.name)}">${activity(e)}<small>${esc(activityDateLabel(e))}${director?` · ${e.callStatus==='Publicada'?'Publicada':'Borrador'} · ${(e.called||[]).length} seleccionados`:''}</small></div>`).join('')}
