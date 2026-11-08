@@ -281,6 +281,13 @@ async function vehicleAvailability(container,vehicles,events){
   day.onchange=redraw;
   redraw();
 }
+function extraClothingOrders(orders){
+ return orders.map(order=>`<article class="row"><div>
+  <strong>${esc(order.created?.slice(0,10)||'Pedido')} · ${euros(order.amount)}</strong>
+  <p>${order.items.map(item=>`${esc(item.quantity+' × '+item.name+' · '+item.size)} · ${euros(item.price*item.quantity)}`).join('<br>')}</p>
+  <small>Estado del cargo · ${esc(order.paymentStatus||'Pendiente')}</small>
+ </div></article>`).join('')||'<p>Sin compras extra registradas.</p>';
+}
 async function shopPage(c){
  const shop=await api('/shop');
  const director=me.role==='director';
@@ -299,6 +306,7 @@ async function shopPage(c){
    ${shop.orders.map(order=>`<article class="row"><div><strong>${esc(order.name)} · ${euros(order.amount)}</strong>
    <p>${order.items.map(item=>esc(item.quantity+' × '+item.name+' · '+item.size)).join('<br>')}</p>
    <small>Correo a Dirección: ${esc(order.emailStatus)}</small></div>
+   <small>Estado del cargo: ${esc(order.paymentStatus||'Pendiente')}</small>
    ${director&&order.emailStatus!=='Enviado'?`<button type="button" data-notify-order="${esc(order.id)}">Reintentar correo</button>`:''}</article>`).join('')||'<p>Aún no hay pedidos.</p>'}</section>`;
  bindForm('shopSettings',async(_,data)=>{
   const prices={};

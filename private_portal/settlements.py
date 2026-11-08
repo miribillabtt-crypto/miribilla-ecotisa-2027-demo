@@ -8,6 +8,24 @@ from flask import abort, g, jsonify
 from sqlalchemy import select
 
 
+def clothing_orders(db, Record, unseal, rider_id=None):
+    query = select(Record).where(Record.kind == 'shop-order')
+    charges = select(Record).where(Record.kind == 'module:charge')
+    if rider_id:
+        query = query.where(Record.owner_id == rider_id)
+    payments = {}
+    for charge in db.scalars(charges):
+        data = unseal(charge.data)
+        if data.get('notes', '').startswith('Pedido '):
+            payments[(data['notes'][7:], data.get('rider'))] = data.get('status', 'Pendiente')
+    orders = []
+    for row in db.scalars(query):
+        data = unseal(row.data)
+        orders.append(dict(data, id=row.id, rider=row.owner_id,
+                           paymentStatus=payments.get((row.id, row.owner_id), 'Cargo pendiente de localizar')))
+    return sorted(orders, key=lambda order: order['created'], reverse=True)
+
+
 def register_settlements(app, Record, User, clothes, seal, unseal, audit, require, body):
     def record(record_id, kind, lock=False):
         item = g.db.get(Record, record_id, with_for_update=lock)
@@ -67,12 +85,8 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
     @require('director', 'runner')
     def shop():
         config = shop_settings()
-        query = select(Record).where(Record.kind == 'shop-order')
-        if g.user.role == 'runner':
-            query = query.where(Record.owner_id == g.user.id)
-        orders = [dict(unseal(row.data), id=row.id) for row in g.db.scalars(query)]
         result = dict(products=[dict(name=name, price=config['prices'].get(name)) for name in clothes],
-                      orders=sorted(orders, key=lambda order: order['created'], reverse=True))
+                      orders=clothing_orders(g.db,Record,unseal,g.user.id if g.user.role=='runner' else None))
         if g.user.role == 'director':
             result['director'] = config['director']
             result['directors'] = [dict(id=u.id, name=u.name) for u in g.db.scalars(

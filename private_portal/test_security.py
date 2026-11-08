@@ -162,12 +162,12 @@ def test_clothes_export_defaults_and_registered_quantities(env):
  assert r.status_code==200
  from openpyxl import load_workbook
  wb=load_workbook(io.BytesIO(c.get('/api/clothes/export').data))
- summary={(item,size):qty for item,size,qty in list(wb['Resumen proveedor'].values)[1:]}
+ summary={(item,size):qty for item,size,qty in list(wb['Resumen dotación'].values)[1:]}
  assert summary[('Camiseta','Sin indicar')]==5
  assert summary[('Maillot corto','S')]==3
  assert summary[('Chaleco','Sin indicar')]==2
- assert ('runner','Culote corto','XS',1) in list(wb['Por corredor'].values)
- totals=dict(list(wb['Total por prenda'].values)[1:])
+ assert ('runner','Culote corto','XS',1) in list(wb['Dotación por corredor'].values)
+ totals=dict(list(wb['Total dotación'].values)[1:])
  assert totals['Camiseta']==5 and totals['Chaleco']==2
  assert totals['TOTAL UNIDADES']==30
  api_riders={rider['id']:rider for rider in c.get('/api/clothes').json['riders']}
@@ -175,8 +175,12 @@ def test_clothes_export_defaults_and_registered_quantities(env):
  assert api_riders[ids['runner2']]['quantities']['Chaleco']==1
  assert c.post('/api/profile/'+ids['runner2'],json={'quantities':{'Chaleco':0}},headers=h).status_code==200
  updated=load_workbook(io.BytesIO(c.get('/api/clothes/export').data))
- assert dict(list(updated['Total por prenda'].values)[1:])['Chaleco']==1
- assert len(list(updated['Por corredor'].values))==27
+ assert dict(list(updated['Total dotación'].values)[1:])['Chaleco']==1
+ assert len(list(updated['Dotación por corredor'].values))==27
+ runner,_=login('runner')
+ other,_=login('runner2')
+ assert runner.get('/api/clothes/mine?user='+ids['runner2']).json['quantities']['Maillot corto']==2
+ assert other.get('/api/clothes/mine').json['quantities']['Chaleco']==0
 
 def test_call_requires_available_runner(env):
  app,ids,login,_=env;c,h=login('director');assert c.post('/api/events',json={'name':'Carrera','date':'2027-02-01','place':'Bilbao'},headers=h).status_code==200
@@ -561,6 +565,20 @@ def test_shop_charge_once_and_license_sides(env,monkeypatch):
  assert len(runner.get('/api/modules/charge').json['records'])==1
  assert runner.get('/api/modules/charge').json['records'][0]['amount']==6400
  assert not other.get('/api/shop').json['orders']
+ order=director.get('/api/shop').json['orders'][0]
+ assert order['rider']==ids['runner'] and order['paymentStatus']=='Pendiente'
+ charge=director.get('/api/modules/charge').json['records'][0]
+ paid={key:value for key,value in charge.items() if key!='id'}
+ paid['status']='Pagado'
+ assert director.post('/api/modules/charge/'+charge['id'],json=paid,headers=h).status_code==200
+ assert runner.get('/api/shop').json['orders'][0]['paymentStatus']=='Pagado'
+ from openpyxl import load_workbook
+ wb=load_workbook(io.BytesIO(director.get('/api/clothes/export').data))
+ extras=list(wb['Compras extra'].values)
+ assert len(extras)==2 and extras[1][2:9]==('runner','Maillot corto','S',2,32,64,'Pagado')
+ assert list(wb['Resumen extras'].values)==[('Prenda extra','Talla','Unidades'),('Maillot corto','S',2)]
+ assert dict(list(wb['Total dotación'].values)[1:])['Maillot corto']==2
+ assert len(director.get('/api/modules/charge').json['records'])==1
  raw=io.BytesIO()
  Image.new('RGB',(30,30),'blue').save(raw,format='PNG')
  for kind in ('licencia','licencia_reverso'):
