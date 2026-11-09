@@ -593,7 +593,23 @@ def create_app(test_config=None):
     @require()
     def roster():
         # Never serialize ORM users: sensitive columns are deliberately excluded.
-        return jsonify(riders=[{'id':u.id,'name':u.name} for u in g.db.scalars(select(User).where(User.role=='runner',User.active==True).order_by(User.name))] if g.user.role in ('director','communication','technician') else [{'id':g.user.id,'name':g.user.name}])
+        inactive=request.args.get('status')=='inactive'
+        if inactive and g.user.role!='director':abort(403)
+        return jsonify(riders=[{'id':u.id,'name':u.name} for u in g.db.scalars(select(User).where(User.role=='runner',User.active== (not inactive)).order_by(User.name))] if g.user.role in ('director','communication','technician') else [{'id':g.user.id,'name':g.user.name}])
+    @app.post('/api/roster/<target>/status')
+    @require('director')
+    def rider_status(target):
+        active=body().get('active')
+        if type(active)!=bool:abort(400)
+        rider=g.db.get(User,target,with_for_update=True)
+        if not rider or rider.role!='runner' or rider.owner:abort(404)
+        rider.active=active
+        if not active:
+            g.db.execute(delete(LoginSession).where(LoginSession.user_id==target))
+            g.db.execute(update(Invite).where(Invite.reset_user==target,Invite.used==False).values(used=True))
+        audit('rider_reactivated' if active else 'rider_deactivated',target)
+        return jsonify(ok=True)
+
     @app.post('/api/roster')
     @require('director')
     def create_rider():

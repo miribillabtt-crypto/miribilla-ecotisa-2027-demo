@@ -99,7 +99,7 @@ window.DemoPortal=(()=>{
    if(path==='/me')return copy({user,csrf:'demo',clothes:garments,fines:[['Falta de respeto leve',5],['Material mal estado',5],['Otras',10]]});
    if(path==='/summary')return {riders:2,events:state.events.length,staff:1,vehicles:1,income:0,expenses:12000};
    if(path==='/events')return copy({events:state.events.filter(event=>!event.archived).map(event=>({...event,myStatus:state.answers[event.id]?.[user.id]||'Por confirmar',responses:state.answers[event.id]||{}}))});
-   if(path==='/roster')return copy({riders:people.filter(person=>person.role==='runner'&&(role!=='runner'||person.id===user.id)).map(({id,name})=>({id,name}))});
+   if(path==='/roster')return copy({riders:people.filter(person=>person.role==='runner'&&(person.active!==false)===(url.searchParams.get('status')!=='inactive')&&(role!=='runner'||person.id===user.id)).map(({id,name})=>({id,name}))});
    if(path==='/users'||path==='/people')return copy(path==='/users'?{users:people}:{people});
    if(parts[0]==='profile')return copy({profile:state.profiles[parts[1]]||{}});
    if(parts[0]==='documents')return {documents:[]};
@@ -114,7 +114,7 @@ window.DemoPortal=(()=>{
    if(path==='/shop')return copy({products:garments.map(name=>({name,price:2000})),orders:state.orders.filter(order=>role!=='runner'||order.rider===user.id),director:'demo-director',directors:[people[0]]});
    if(path==='/fines')return copy({fines:state.fines.filter(fine=>!fine.archived&&(role!=='runner'||fine.user===user.id))});
    if(path==='/accounts'){
-    const riders=people.filter(person=>person.role==='runner'&&(role!=='runner'||person.id===user.id)).map(person=>{
+    const riders=people.filter(person=>person.role==='runner'&&(person.active!==false)===(url.searchParams.get('status')!=='inactive')&&(role!=='runner'||person.id===user.id)).map(person=>{
      const row={id:person.id,name:person.name,clothes:0,races:0,fines:0,other:0,total:0,paid:0,pending:0};
      for(const charge of state.modules.charge.filter(item=>item.rider===person.id&&item.status!=='Anulado')){
       row[charge.concept?.includes('ropa')?'clothes':charge.event?'races':'other']+=charge.amount;
@@ -170,6 +170,7 @@ window.DemoPortal=(()=>{
    state.modules.charge.push({id:id(),rider:user.id,event:'',concept:'Compra de ropa',amount:order.amount,status:'Pendiente',notes:'Pedido '+order.id});
    return copy(order);
   }
+  if(parts[0]==='roster'&&parts[2]==='status'){if(role!=='director')throw Error('Sin permiso');const person=people.find(p=>p.id===parts[1]&&p.role==='runner');if(!person)throw Error('Corredor no encontrado');person.active=data.active;return {ok:true};}
   if(path==='/fines'){state.fines.push({id:id(),user:data.user,reason:'Multa de demostración',amount:5,date:'2027-02-27',status:'Pendiente'});return {ok:true};}
   if(parts[0]==='fines'){const fine=state.fines.find(fine=>fine.id===parts[1]);if(parts[2]==='archive')fine.archived=true;else Object.assign(fine,data);return {ok:true};}
   throw Error('Acción de demostración. Puedes consultar los paneles y editar los datos de ejemplo.');

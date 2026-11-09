@@ -363,10 +363,12 @@ function showRiderInvites(results,invitations){
   });
 }
 async function rosterPage(c){
-  roster=(await api('/roster')).riders;
+  const [activeResult,inactiveResult]=await Promise.all([api('/roster'),api('/roster?status=inactive')]);
+  roster=activeResult.riders;
+  const inactive=inactiveResult.riders;
   const accounts=me.owner?(await api('/users')).users:[];
   const eligible=new Set(accounts.filter(u=>u.active&&u.role==='runner'&&!u.accountReady&&!u.email).map(u=>u.id));
-  c.innerHTML=`<h1>Corredores</h1>
+  c.innerHTML=`<h1>Corredores · Altas y bajas</h1><p>Da de alta nuevos corredores o utiliza Dar de baja junto a su ficha. Las bajas conservan el historial y cierran el acceso al área privada.</p>
     <details class="card"><summary>Dar de alta corredor</summary>
       <form id="createRider">
         <label>Nombre<input name="firstName" maxlength="100" required></label>
@@ -385,8 +387,16 @@ async function rosterPage(c){
     ${roster.filter(r=>eligible.has(r.id)).map(r=>`<label class="checkline"><input type="checkbox" name="rider" value="${esc(r.id)}" checked>${esc(r.name)}</label>`).join('')}
     <button type="submit" class="primary">Generar enlaces de registro</button><div id="rosterInviteResults" aria-live="polite"></div></form>`:''}
     <label>Buscar corredor<input type="search" id="riderSearch" placeholder="Nombre o apellidos"></label>
-    <div class="card" id="riderSearchResults">${roster.map(r=>`<div class="row" data-search-name="${esc(r.name)}"><strong>${esc(r.name)}</strong><button type="button" data-profile="${esc(r.id)}">Abrir ficha</button></div>`).join('')}
-    <p data-no-matches hidden>${roster.length?'No hay corredores que coincidan.':'Aún no hay corredores registrados.'}</p></div>`;
+    <div class="card" id="riderSearchResults">${roster.map(r=>`<div class="row" data-search-name="${esc(r.name)}"><strong>${esc(r.name)}</strong><button type="button" data-profile="${esc(r.id)}">Abrir ficha</button><button type="button" data-rider-status="${esc(r.id)}" data-active="false">Dar de baja</button></div>`).join('')}
+    <p data-no-matches hidden>${roster.length?'No hay corredores que coincidan.':'Aún no hay corredores registrados.'}</p></div><details class="card"><summary>Corredores de baja · ${inactive.length}</summary>${inactive.map(r=>`<div class="row"><strong>${esc(r.name)}</strong><button type="button" data-rider-status="${esc(r.id)}" data-active="true">Volver a dar de alta</button></div>`).join('')||'<p>No hay corredores de baja.</p>'}</details>`;
+  c.querySelectorAll('[data-rider-status]').forEach(button=>button.onclick=async()=>{
+    const active=button.dataset.active==='true';
+    const rider=[...roster,...inactive].find(r=>r.id===button.dataset.riderStatus);
+    if(!confirm(active?`¿Volver a dar de alta a ${rider.name}?`:`¿Dar de baja a ${rider.name}? Se cerrará su acceso y se conservarán su ficha, documentos e historial.`))return;
+    button.disabled=true;
+    try{await api('/roster/'+encodeURIComponent(rider.id)+'/status','POST',{active});await rosterPage(c);message(active?'Corredor dado de alta de nuevo.':'Corredor dado de baja. Su historial se conserva.');}
+    catch(error){message(error.message);button.disabled=false;}
+  });
   bindNameSearch(c.querySelector('#riderSearch'),c.querySelector('#riderSearchResults'));
   c.querySelectorAll('[data-profile]').forEach(b=>b.onclick=()=>profilePage(c,b.dataset.profile).catch(e=>message(e.message)));
   bindForm('createRider',async(form,{firstName,surname})=>{

@@ -1049,3 +1049,25 @@ def test_individual_call_states_keep_availability_and_exports(env):
  event=next(e for e in director.get('/api/events').json['events'] if e['id']==event['id'])
  assert event['called']==[] and event['precalled']==[ids['runner2']]
  assert 'BEGIN:VEVENT' not in runner.get('/api/calendar.ics?scope=selected').text
+
+def test_direction_rider_status_preserves_records_and_revokes_access(env):
+ app,ids,login,_=env
+ director,h=login('director_limited')
+ runner,rh=login('runner')
+ path='/api/roster/'+ids['runner']+'/status'
+ assert runner.post(path,json={'active':False},headers=rh).status_code==403
+ assert director.post(path,json={'active':'false'},headers=h).status_code==400
+ assert director.post('/api/roster/'+ids['technician']+'/status',json={'active':False},headers=h).status_code==404
+ assert director.get('/api/roster?status=inactive').json['riders']==[]
+ assert director.post(path,json={'active':False},headers=h).status_code==200
+ assert ids['runner'] not in [r['id'] for r in director.get('/api/roster').json['riders']]
+ assert ids['runner'] in [r['id'] for r in director.get('/api/roster?status=inactive').json['riders']]
+ assert runner.get('/api/profile/'+ids['runner']).status_code==401
+ db=app.extensions['db_sessions']()
+ assert db.get(User,ids['runner']) is not None
+ db.close()
+ assert director.post(path,json={'active':True},headers=h).status_code==200
+ assert ids['runner'] in [r['id'] for r in director.get('/api/roster').json['riders']]
+ assert director.get('/api/roster?status=inactive').json['riders']==[]
+ restored,_=login('runner')
+ assert restored.get('/api/profile/'+ids['runner']).status_code==200
