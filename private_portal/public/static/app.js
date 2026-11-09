@@ -485,24 +485,24 @@ async function clothesPage(c){
     <button type="button" id="clothingCharges">Ver cobros por corredor</button></div>
     <p id="clothesTotal"></p>
     <p>Compras extra registradas: ${activeOrders.length} pedidos · ${euros(activeOrders.reduce((sum,order)=>sum+order.amount,0))}</p>
-    <div class="note">Dotación del equipo: una unidad de cada prenda y dos camisetas por defecto. Se respetan las cantidades ajustadas y puedes poner 0 para excluir una prenda. Las compras extra muestran los pedidos de la tienda y su cargo en la cuenta del corredor. El Excel tiene hojas independientes para la dotación y las compras extra.</div>
+    <div class="note">Dotación del equipo: una unidad de cada prenda y dos camisetas por defecto. Se respetan las cantidades ajustadas y puedes poner 0 para excluir una prenda. Despliega el nombre de cada corredor para editar sus tallas y cantidades. Las compras extra muestran los pedidos de la tienda y su cargo en la cuenta del corredor. El Excel tiene hojas independientes para la dotación y las compras extra.</div>
     <details class="card"><summary>Total de la dotación por prenda</summary><div id="clothesSummary"></div></details>`+riders.map(r=>`
-    <article class="card" data-rider-clothing="${esc(r.id)}">
-      <h2>${esc(r.name)}</h2>
+    <details class="card" data-rider-clothing="${esc(r.id)}">
+      <summary><strong>${esc(r.name)}</strong> · Editar tallas y pedido</summary>
     <form method="post" data-clothing="${esc(r.id)}">
       <h3>Dotación del equipo · A cargo del club</h3>
-      <div class="scroll"><table><thead><tr><th>Prenda</th><th>Talla registrada</th><th>Unidades</th></tr></thead>
-      <tbody>${clothes.map(item=>`<tr><td>${esc(item)}</td><td>${esc(r.sizes[item]||'Sin indicar')}</td>
+      <div class="scroll"><table><thead><tr><th>Prenda</th><th>Talla</th><th>Unidades</th></tr></thead>
+      <tbody>${clothes.map(item=>`<tr><td>${esc(item)}</td><td><select name="size:${esc(item)}" aria-label="Talla de ${esc(item)} de ${esc(r.name)}">${['','XXS','XS','S','M','L','XL','XXL','XXXL'].map(size=>`<option value="${esc(size)}" ${size===(r.sizes[item]||'')?'selected':''}>${esc(size||'Sin indicar')}</option>`).join('')}</select></td>
       <td><input type="number" name="${esc(item)}" min="0" max="100" step="1" required value="${r.quantities[item]??(item==='Camiseta'?2:1)}" aria-label="Cantidad de ${esc(item)}"></td></tr>`).join('')}</tbody></table></div>
-      <button type="submit">Guardar dotación</button>
+      <button type="submit">Guardar tallas y dotación</button>
     </form><section><h3>Compras extra · A cargo del corredor</h3>
       ${extraClothingOrders(orders.filter(order=>order.rider===r.id))}
-    </section></article>`).join('');
+    </section></details>`).join('');
   c.querySelector('#clothingShop').onclick=()=>navigate('shop');
   c.querySelector('#clothingCharges').onclick=()=>navigate('charges');
   const forms=[...c.querySelectorAll('[data-clothing]')];
   const download=c.querySelector('#clothesExport');
-  const total=()=>forms.flatMap(f=>[...new FormData(f).values()]).reduce((sum,value)=>sum+Number(value),0);
+  const total=()=>forms.flatMap(f=>[...f.querySelectorAll('input[type="number"]')]).reduce((sum,input)=>sum+Number(input.value),0);
   const showTotal=()=>{
     c.querySelector('#clothesTotal').textContent=`${riders.length} corredores · ${total()} unidades de dotación del equipo`;
     c.querySelector('#clothesSummary').innerHTML=`<table><thead><tr><th>Prenda</th><th>Unidades</th></tr></thead><tbody>${clothes.map(item=>{
@@ -516,8 +516,10 @@ async function clothesPage(c){
   const save=async form=>{
     const values=snapshot(form);
     if(values===saved.get(form))return;
-    const quantities=Object.fromEntries(Object.entries(JSON.parse(values)).map(([item,value])=>[item,Number(value)]));
-    await api('/profile/'+form.dataset.clothing,'POST',{quantities});
+    const entries=Object.entries(JSON.parse(values));
+    const quantities=Object.fromEntries(entries.filter(([item])=>!item.startsWith('size:')).map(([item,value])=>[item,Number(value)]));
+    const sizes=Object.fromEntries(entries.filter(([item])=>item.startsWith('size:')).map(([item,value])=>[item.slice(5),value]));
+    await api('/profile/'+form.dataset.clothing,'POST',{quantities,sizes});
     saved.set(form,values);
   };
   const run=async action=>{
@@ -530,7 +532,7 @@ async function clothesPage(c){
     form.oninput=showTotal;
     form.onsubmit=e=>{
       e.preventDefault();
-      run(async()=>{if(!form.reportValidity())return;await save(form);message('Cantidades del pedido guardadas.');});
+      run(async()=>{if(!form.reportValidity())return;await save(form);message('Tallas y cantidades del corredor guardadas.');});
     };
   });
   download.onclick=()=>run(async()=>{
