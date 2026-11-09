@@ -69,7 +69,7 @@ def register_invoice_exports(app, Record, Document, cipher, unseal, audit, requi
         sheet.title = 'Relación de gastos'
         sheet.append(['Justificante', 'Fecha', 'Proveedor', 'NIF / CIF', 'N.º de factura',
                       'Concepto', 'Categoría', 'Actividad', 'Partida', 'Base (€)', 'IVA (€)',
-                      'Importe (€)', 'Estado', 'Archivos adjuntos'])
+                      'Importe (€)', 'Estado', 'Archivos adjuntos', 'Club que paga'])
         for entry_id, data in entries:
             event = g.db.get(Record, data['event']) if data.get('event') else None
             budget = g.db.get(Record, data['budget']) if data.get('budget') else None
@@ -80,7 +80,7 @@ def register_invoice_exports(app, Record, Document, cipher, unseal, audit, requi
                 data.get('category', ''), unseal(event.data).get('name', '') if event else '',
                 unseal(budget.data).get('category', '') if budget else '',
                 data.get('baseAmount', 0) / 100, data.get('taxAmount', 0) / 100,
-                data.get('amount', 0) / 100, data.get('status', ''), count or 'Sin adjuntar',
+                data.get('amount', 0) / 100, data.get('status', ''), count or 'Sin adjuntar', data.get('payerClub') or 'Sin asignar',
             ])
             for cell in sheet[sheet.max_row]:
                 if isinstance(cell.value, str):

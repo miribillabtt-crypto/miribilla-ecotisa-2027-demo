@@ -13,7 +13,7 @@ SPECS={
  'travel':dict(event='event',manager='s',hotel='s',hotelAddress='s',hotelPhone='s',booking='s',departureBilbao='s',departureZaragoza='s',meeting='s',plan='s',staff='staff[]',vehicles='vehicle[]',rooming='s',registrationDeadline='s',registrationStatus='s',registrationReference='s',routeUrl='url',scheduleUrl='url'),
  'result':dict(event='event',rider='runner',place='i',days='i',discipline='s',notes='s'),
  'days':dict(event='event',person='person',days='i',function='s',notes='s'),
- 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',notes='s'),
+ 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',payerClub='club',notes='s'),
  'budget':dict(category='s',amount='money',notes='s'),
  'bank':dict(date='date',concept='s',reference='s',amount='money',direction='direction',matched='s'),
  'charge':dict(event='event?',rider='runner',concept='s',amount='money',status='s',notes='s'),
@@ -68,9 +68,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if not isinstance(d,dict) or set(d)-set(spec):abort(400,'Campos no válidos')
   for key,typ in spec.items():
    v=d.get(key,[] if typ.endswith('[]') else 0 if typ in ('i','money') else '')
-   if typ in ('s','url','date','direction','posttype','format','poststatus'):
+   if typ in ('s','url','date','direction','posttype','format','poststatus','club'):
     if not isinstance(v,str) or len(v)>2500:abort(400,'Revisa '+key)
     v=v.strip()
+    if typ=='club' and v not in ('','Miribilla','Ecotisa'):abort(400,'Selecciona Miribilla o Ecotisa')
     if typ=='url' and v and not v.startswith('https://'):abort(400,'Los enlaces deben comenzar por https://')
     if typ=='date' and v:
      try:datetime.date.fromisoformat(v)
@@ -310,6 +311,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   payload=body()
   previous=unseal(r.data) if kind=='entry' else None
   if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
+  if kind=='entry' and previous and 'payerClub' not in payload:payload['payerClub']=previous.get('payerClub','')
   data=validate(kind,payload,previous)
   if kind=='bank':validate_bank_link(Record,unseal,data,record_id)
   if kind=='travel':

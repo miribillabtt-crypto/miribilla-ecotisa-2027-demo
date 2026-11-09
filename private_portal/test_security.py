@@ -1071,3 +1071,25 @@ def test_direction_rider_status_preserves_records_and_revokes_access(env):
  assert director.get('/api/roster?status=inactive').json['riders']==[]
  restored,_=login('runner')
  assert restored.get('/api/profile/'+ids['runner']).status_code==200
+
+def test_invoice_payer_club_validation_preservation_and_export(env):
+ from openpyxl import load_workbook
+ _,_,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ data=dict(direction='Gasto',concept='Hotel',amount=12345,status='Pagado',payerClub='Miribilla')
+ assert runner.post('/api/modules/entry',json=data,headers=rh).status_code==403
+ assert director.post('/api/modules/entry',json={**data,'payerClub':'Otro'},headers=h).status_code==400
+ assert director.post('/api/modules/entry',json=data,headers=h).status_code==200
+ record=director.get('/api/modules/entry').json['records'][0]
+ assert record['payerClub']=='Miribilla' and record['amount']==12345
+ legacy={k:v for k,v in data.items() if k!='payerClub'}
+ assert director.post('/api/modules/entry/'+record['id'],json=legacy,headers=h).status_code==200
+ assert director.get('/api/modules/entry').json['records'][0]['payerClub']=='Miribilla'
+ assert director.post('/api/modules/entry/'+record['id'],json={**data,'payerClub':'Ecotisa'},headers=h).status_code==200
+ workbook=load_workbook(io.BytesIO(director.get('/api/invoices/report.xlsx').data))
+ sheet=workbook['Relación de gastos'];header=[cell.value for cell in sheet[1]]
+ assert sheet.cell(2,header.index('Club que paga')+1).value=='Ecotisa'
+ assert sheet.cell(2,header.index('Importe (€)')+1).value==123.45
+ assert director.post('/api/modules/entry',json=legacy,headers=h).status_code==200
+ assert any(r.get('payerClub')=='' for r in director.get('/api/modules/entry').json['records'])
