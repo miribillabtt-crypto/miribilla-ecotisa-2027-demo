@@ -981,3 +981,31 @@ def test_bank_xlsx_preview_and_expense_reconciliation(env):
  assert director.post(endpoint+'/'+movements['HOTEL-1']['id'],json={'invoice':expense},headers=h).status_code==200
  assert director.post('/api/bank/import',json={'rows':rows},headers=h).json['imported']==0
  assert any(row['state']=='Conciliado' for row in director.get(endpoint).json['movements'])
+
+def test_direction_removes_and_restores_event_without_losing_linked_data(env):
+ app,ids,login,_=env
+ director,h=login('director');runner,rh=login('runner')
+ assert director.post('/api/events',json={'name':'Concentración recuperable','date':'2027-06-01','endDate':'2027-06-03','category':'Concentración'},headers=h).status_code==200
+ event=next(e for e in director.get('/api/events').json['events'] if e['name']=='Concentración recuperable')
+ path='/api/events/'+event['id']
+ assert runner.post(path+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
+ assert director.post(path+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
+ assert director.post('/api/modules/entry',json={'event':event['id'],'direction':'Gasto','amount':1200,'concept':'Hotel','status':'Pendiente'},headers=h).status_code==200
+ assert runner.post(path+'/archive',json={},headers=rh).status_code==403
+ assert director.post(path+'/details',json={'date':'2027-07-04','endDate':'2027-07-06'},headers=h).status_code==200
+ moved=next(e for e in director.get('/api/events').json['events'] if e['id']==event['id'])
+ assert moved['date']=='2027-07-04' and moved['endDate']=='2027-07-06' and moved['called']==[ids['runner']]
+ db=app.extensions['db_sessions']()
+ before={r.id:r.data for r in db.scalars(select(Record)).all()};db.close()
+ assert director.post(path+'/archive',json={},headers=h).status_code==200
+ assert director.post(path+'/archive',json={},headers=h).status_code==200
+ assert all(e['id']!=event['id'] for e in runner.get('/api/events').json['events'])
+ assert 'Concentración recuperable' not in director.get('/api/calendar.ics').text
+ assert any(e['id']==event['id'] and e['kind']=='event' for e in director.get('/api/archive').json['records'])
+ db=app.extensions['db_sessions']()
+ for record_id,data in before.items():assert db.get(Record,record_id).data==data
+ db.close()
+ assert director.post('/api/archive/'+event['id']+'/restore',json={},headers=h).status_code==200
+ restored=next(e for e in runner.get('/api/events').json['events'] if e['id']==event['id'])
+ assert restored['called']==[ids['runner']] and restored['date']=='2027-07-04'
+ assert any(r['event']==event['id'] and r['amount']==1200 for r in director.get('/api/modules/entry').json['records'])

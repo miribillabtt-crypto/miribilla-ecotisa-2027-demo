@@ -351,8 +351,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @app.post('/api/archive/<record_id>/restore')
  @require('director')
  def restore(record_id):
-  r=g.db.get(Record,record_id)
+  lock_travel()
+  r=g.db.get(Record,record_id,with_for_update=True)
   if not r or not r.kind.startswith('archived:'):abort(404)
+  if r.kind=='archived:event':
+   for travel in rows('travel'):
+    data=unseal(travel.data)
+    if data.get('event')==r.id:check_vehicle_reservations(data,unseal(r.data),travel.id)
+   r.kind='event';audit('event_restored',r.id);return jsonify(ok=True)
   if r.kind=='archived:bank':
    bank_lock()
    validate_bank_link(Record,unseal,unseal(r.data),r.id)
@@ -388,6 +394,16 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def summary():
   def amounts(kind,direction=None):return sum(unseal(r.data).get('amount',0) for r in rows(kind) if not direction or unseal(r.data).get('direction')==direction)
   return jsonify(riders=g.db.scalar(select(__import__('sqlalchemy').func.count()).select_from(User).where(User.role=='runner',User.active==True)),events=g.db.scalar(select(__import__('sqlalchemy').func.count()).select_from(Record).where(Record.kind=='event')),income=amounts('entry','Ingreso'),expenses=amounts('entry','Gasto'),budget=amounts('budget'),charges=amounts('charge'),staff=len(rows('staff')),vehicles=len(rows('vehicle')))
+ @app.post('/api/events/<event_id>/archive')
+ @require('director')
+ def archive_event(event_id):
+  lock_travel()
+  record=g.db.get(Record,event_id,with_for_update=True)
+  if not record or record.kind not in ('event','archived:event'):abort(404)
+  if record.kind=='event':
+   record.kind='archived:event'
+   audit('event_archived',record.id)
+  return jsonify(ok=True)
  @app.post('/api/events/<event_id>/details')
  @require('director')
  def event_details(event_id):

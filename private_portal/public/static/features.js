@@ -1,5 +1,5 @@
 'use strict';
-const moduleLabels={staff:'Técnicos',vehicle:'Vehículos',travel:'Viajes, hoteles e inscripciones',result:'Resultados',days:'Días de actividad',entry:'CONTA · Ingresos y gastos',budget:'Presupuesto',bank:'Banco y conciliación',charge:'Liquidaciones por corredor',license:'Licencias',sport:'Material y medidas',post:'Publicaciones'};
+const moduleLabels={event:'Carrera o actividad',staff:'Técnicos',vehicle:'Vehículos',travel:'Viajes, hoteles e inscripciones',result:'Resultados',days:'Días de actividad',entry:'CONTA · Ingresos y gastos',budget:'Presupuesto',bank:'Banco y conciliación',charge:'Liquidaciones por corredor',license:'Licencias',sport:'Material y medidas',post:'Publicaciones'};
 const moduleSpecs={
  staff:[['name','Nombre'],['function','Función'],['city','Población'],['phone','Teléfono'],['user','Usuario técnico','person?'],['notes','Observaciones','textarea']],
  vehicle:[['name','Vehículo'],['plate','Matrícula'],['seats','Plazas','integer'],['driver','Conductor habitual'],['notes','Observaciones','textarea']],
@@ -625,6 +625,28 @@ async function drawPost(p){const canvas=document.getElementById('postCanvas'),ct
 function wrapped(text,x,y,width,font,lineHeight){ctx.font=font;const words=String(text).split(/\s+/);let line='',yy=y;for(const word of words){const test=line?line+' '+word:word;if(ctx.measureText(test).width>width&&line){ctx.fillText(line,x,yy);line=word;yy+=lineHeight;}else line=test;}ctx.fillText(line,x,yy);return yy+lineHeight;}
 let y=wrapped(p.title||event?.name||'Equipo',64,230,950,'600 62px sans-serif',74);ctx.font='400 30px sans-serif';y=wrapped(p.subtitle||event?.date||'Fecha por confirmar',64,y+10,950,'400 30px sans-serif',40)+20;const selected=p.riders.map(id=>people.find(x=>x.id===id)||{id,name:me.id===id?me.name:'Corredor',photos:[]});const cols=selected.length===1?1:selected.length<=4?2:selected.length>12?4:3;const gap=20,w=(950-gap*(cols-1))/cols;const rows=Math.ceil(selected.length/cols);const cardH=Math.min(selected.length===1?Math.min(650,h-y-120):300,Math.max(90,(h-y-110)/Math.max(rows,1)-20));for(let i=0;i<selected.length;i++){const rider=selected[i],x=64+(i%cols)*(w+gap),cy=y+Math.floor(i/cols)*(cardH+20);ctx.fillStyle=template===2||template===4?'#dce4eb':'#23445f';ctx.fillRect(x,cy,w,cardH);const img=await imageFor(rider);if(img){const photoH=Math.max(0,cardH-60);if(photoH){const scale=Math.max(w/img.width,photoH/img.height);ctx.save();ctx.beginPath();ctx.rect(x,cy,w,photoH);ctx.clip();ctx.drawImage(img,x+(w-img.width*scale)/2,cy+(photoH-img.height*scale)/2,img.width*scale,img.height*scale);ctx.restore();}img.close();}else{ctx.fillStyle=fg;ctx.font='600 60px sans-serif';ctx.fillText(rider.name.slice(0,1),x+24,cy+Math.min(80,cardH-10));}ctx.fillStyle=fg;ctx.font='500 25px sans-serif';let name=rider.name;while(ctx.measureText(name).width>w-24&&name.length>1)name=name.slice(0,-1);ctx.fillText(name,x+12,cy+cardH-20);}ctx.fillStyle=fg;ctx.font='400 24px sans-serif';ctx.fillText(event?.place||'Miribilla Cycling · Ecotisa',64,h-45);document.getElementById('downloadPost').disabled=false;document.getElementById('sharePost').disabled=false;document.getElementById('postHint').textContent=(p.status||'Vista previa')+' · '+p.format;}
 document.getElementById('downloadPost').onclick=()=>{const a=document.createElement('a');a.download='Miribilla_Ecotisa_'+(currentPost?.type||'publicacion')+'.png';a.href=document.getElementById('postCanvas').toDataURL('image/png');a.click();};document.getElementById('sharePost').onclick=()=>{document.getElementById('postCanvas').toBlob(async blob=>{try{const f=new File([blob],'Miribilla_Ecotisa.png',{type:'image/png'});if(navigator.canShare?.({files:[f]})){await navigator.share({files:[f],title:currentPost?.title||'Miribilla Ecotisa'});}else{document.getElementById('downloadPost').click();message('Imagen descargada. Puedes publicarla desde tu red social.');}}catch(e){if(e.name!=='AbortError')message(e.message);}},'image/png');};if(saved.length){currentPost=saved[saved.length-1];await drawPost(currentPost);}}
+async function removeCalendarEvent(c,event){
+ if(!confirm('¿Eliminar «'+event.name+'» del calendario? Se conservarán sus gastos, documentos y convocatorias. Podrás recuperarla desde Archivados.'))return;
+ const buttons=c.querySelectorAll('#removeCalendarEvent');buttons.forEach(button=>button.disabled=true);
+ try{await api('/events/'+encodeURIComponent(event.id)+'/archive','POST',{});await calendarPage(c);message('Actividad eliminada del calendario. Puedes recuperarla desde Archivados.');}
+ catch(error){message(error.message);buttons.forEach(button=>button.disabled=false);}
+}
+function moveCalendarEvent(c,event){
+ c.innerHTML=`<h1>Cambiar fecha · ${esc(event.name)}</h1><form method="post" id="moveEventDate" class="card">
+  <p>Para una carrera o concentración de varios días, indica el inicio y el final.</p>
+  <div class="grid">${field('Fecha de inicio','date','date',event.date||'')}${field('Fecha de fin (opcional)','endDate','date',event.endDate||'')}</div>
+  <p>Se conservan la convocatoria, el viaje y los gastos. Revisa la disponibilidad de corredores, técnicos y vehículos para las nuevas fechas.</p>
+  <button type="submit" class="primary">Guardar nueva fecha</button><button type="button" id="cancelMoveEvent">Cancelar</button></form>`;
+ const form=c.querySelector('#moveEventDate'),start=form.elements.date,end=form.elements.endDate;
+ start.required=true;end.min=start.value;
+ let previous=start.value;
+ start.onchange=()=>{
+  if(previous&&end.value&&start.value){const days=(Date.parse(end.value)-Date.parse(previous))/86400000;if(days>=0){const shifted=new Date(Date.parse(start.value)+days*86400000);if(!Number.isNaN(shifted.valueOf()))end.value=shifted.toISOString().slice(0,10);}}
+  end.min=start.value;previous=start.value;
+ };
+ bindForm('moveEventDate',async(_,data)=>{await api('/events/'+encodeURIComponent(event.id)+'/details','POST',data);await calendarPage(c,event.id);message('Fechas actualizadas. Revisa la disponibilidad para las nuevas fechas.');});
+ c.querySelector('#cancelMoveEvent').onclick=()=>calendarPage(c,event.id).catch(error=>message(error.message));
+}
 function editEvent(c,event){
  c.innerHTML=`<h1>Editar actividad</h1><form method="post" id="eventDetails" class="card">
   <div class="grid">${activityClassification(event)}${[['name','Nombre'],['date','Fecha de inicio','date'],['endDate','Fecha de fin','date'],['place','Lugar'],['status','Estado',['Programada','Confirmada','Finalizada','Cancelada']],['owner','Responsable']].map(field=>moduleInput(field,event,{})).join('')}</div>

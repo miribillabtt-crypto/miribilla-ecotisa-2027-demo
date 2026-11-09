@@ -200,7 +200,7 @@ async function calendarPage(c,selectedId){
       ${event.owner?`<p>Responsable: ${esc(event.owner)}</p>`:''}
       ${event.notes?`<p class="event-notes">${esc(event.notes)}</p>`:''}
       ${availableRole?`${runner?`<p class="resource-state ${riderCallState(event).style}">${riderCallState(event).label}</p>${riderAvailabilityInput(event)}`:select('Mi disponibilidad','status',['Por confirmar','Disponible','No disponible'],event.myStatus)}`:''}
-      ${director?'<button type="button" id="editCalendarEvent">Editar prueba o actividad</button>':''}
+      ${director?'<div class="toolbar"><button type="button" id="editCalendarEvent">Editar prueba o actividad</button><button type="button" id="moveCalendarEvent">Cambiar fecha</button><button type="button" id="removeCalendarEvent">Eliminar del calendario</button></div>':''}
       </article>
       ${director?`<div class="section-links activity-sections" role="group" aria-label="Ficha de la actividad">
         <button type="button" data-activity-section="call" aria-pressed="true" class="active">Convocatoria</button>
@@ -220,6 +220,8 @@ async function calendarPage(c,selectedId){
     document.getElementById('backCalendar').onclick=()=>navigate(page);
     if(director){
       document.getElementById('editCalendarEvent').onclick=()=>editEvent(c,event);
+      c.querySelector('#moveCalendarEvent').onclick=()=>moveCalendarEvent(c,event);
+      c.querySelector('#removeCalendarEvent').onclick=()=>removeCalendarEvent(c,event);
       const publish=c.querySelector('#activityPublish');
       const callForm=c.querySelector('#calendarCall');
       const selection=()=>[...callForm.querySelectorAll('input:checked:not(:disabled)')].map(input=>input.value);

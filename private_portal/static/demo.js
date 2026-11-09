@@ -98,7 +98,7 @@ window.DemoPortal=(()=>{
   if(method==='GET'){
    if(path==='/me')return copy({user,csrf:'demo',clothes:garments,fines:[['Falta de respeto leve',5],['Material mal estado',5],['Otras',10]]});
    if(path==='/summary')return {riders:2,events:state.events.length,staff:1,vehicles:1,income:0,expenses:12000};
-   if(path==='/events')return copy({events:state.events.map(event=>({...event,myStatus:state.answers[event.id]?.[user.id]||'Por confirmar',responses:state.answers[event.id]||{}}))});
+   if(path==='/events')return copy({events:state.events.filter(event=>!event.archived).map(event=>({...event,myStatus:state.answers[event.id]?.[user.id]||'Por confirmar',responses:state.answers[event.id]||{}}))});
    if(path==='/roster')return copy({riders:people.filter(person=>person.role==='runner'&&(role!=='runner'||person.id===user.id)).map(({id,name})=>({id,name}))});
    if(path==='/users'||path==='/people')return copy(path==='/users'?{users:people}:{people});
    if(parts[0]==='profile')return copy({profile:state.profiles[parts[1]]||{}});
@@ -130,7 +130,8 @@ window.DemoPortal=(()=>{
     return {riders,totals};
    }
    if(path==='/audit')return {entries:[]};
-   if(path==='/archive'||path==='/resource-availability')return {records:[]};
+   if(path==='/archive')return copy({records:state.events.filter(event=>event.archived).map(event=>({...event,kind:'event'}))});
+   if(path==='/resource-availability')return {records:[]};
    if(path==='/bank/reconciliation')return {movements:[]};
    if(path==='/media/roster')return copy({riders:people.filter(person=>person.role==='runner').map(({id,name})=>({id,name,photos:[]}))});
    if(parts[2]==='hotel')return {guests:[]};
@@ -139,10 +140,12 @@ window.DemoPortal=(()=>{
   if(path==='/logout'){stop();return {ok:true};}
   if(parts[0]==='profile'){Object.assign(state.profiles[parts[1]],data);return {ok:true};}
   if(path==='/events'){const event={...data,id:id(),called:[],callStatus:'Borrador'};state.events.push(event);return {ok:true};}
+  if(parts[0]==='archive'&&parts[2]==='restore'){const event=state.events.find(item=>item.id===parts[1]);if(event)event.archived=false;return {ok:true};}
   if(parts[0]==='events'){
    const event=state.events.find(item=>item.id===parts[1]);
    if(!event)throw Error('Actividad de ejemplo no encontrada');
    if(parts[2]==='availability'){state.answers[event.id]??={};state.answers[event.id][user.id]=data.status;}
+   else if(parts[2]==='archive')event.archived=true;
    else if(parts[2]==='details')Object.assign(event,data);
    else if(parts[2]==='call')event.called=data.users;
    else if(parts[2]==='split-expenses'){
