@@ -97,6 +97,7 @@ function bindNameSearch(input,container){
 }
 
 function riderCallState(event){
+ if((event.precalled||[]).includes(me.id))return {label:'Preconvocado',style:'assigned'};
  if(!(event.called||[]).includes(me.id))return {label:'No convocado',style:'pending'};
  return event.callStatus==='Publicada'?{label:'Convocado',style:'available'}:{label:'Preconvocado',style:'assigned'};
 }
@@ -111,7 +112,7 @@ function riderAvailabilityInput(event){
 function riderCalendar(c,events){
  const sorted=sortActivities(events);
  c.innerHTML=`<h1>Calendario del equipo</h1>
-  <p>Responde Disponible o No disponible en cada carrera y concentración. Dirección podrá convocarte cuando hayas indicado Disponible.</p>
+  <p>Responde Disponible o No disponible en cada carrera y concentración para informar a Dirección. Dirección decide la convocatoria.</p>
   <p id="riderAvailabilityPending" role="status"></p>
   <details class="card"><summary>Exportar calendario</summary>
    <form method="get" action="/api/calendar.ics" class="toolbar">
@@ -214,8 +215,8 @@ async function calendarPage(c,selectedId){
         <a class="button" href="/api/events/${encodeURIComponent(event.id)}/package">Descargar convocatoria y paquete hotel</a>
       </div>
       <details class="event-call"><summary>Abrir corredores para convocar · ${called.length} seleccionados</summary>
-      <form method="post" id="calendarCall">${riders.map(r=>`<label class="checkline"><input type="checkbox" name="selected" value="${esc(r.id)}" ${called.includes(r.id)?'checked':''} ${responses[r.id]!=='Disponible'?'disabled':''}>${esc(r.name)} · ${esc(responses[r.id]||'Por confirmar')}</label>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
-      <button type="submit">Guardar selección de corredores</button></form></details>
+      <form method="post" id="calendarCall"><p>La disponibilidad es informativa: puedes decidir la convocatoria aunque no haya respuesta o figure No disponible.</p>${riders.map(r=>`<div class="card"><strong>${esc(r.name)}</strong><p>Disponibilidad: <strong>${esc(['Disponible','No disponible'].includes(responses[r.id])?responses[r.id]:'Sin responder')}</strong></p>${select('Convocatoria','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</div>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
+      <button type="submit">Guardar convocatoria</button></form></details>
       </section><section class="card" id="eventTravelPanel" hidden></section><section class="card" id="eventExpensePanel" hidden></section>`:''}`;
     document.getElementById('backCalendar').onclick=()=>navigate(page);
     if(director){
@@ -224,37 +225,25 @@ async function calendarPage(c,selectedId){
       c.querySelector('#removeCalendarEvent').onclick=()=>removeCalendarEvent(c,event);
       const publish=c.querySelector('#activityPublish');
       const callForm=c.querySelector('#calendarCall');
-      const selection=()=>[...callForm.querySelectorAll('input:checked:not(:disabled)')].map(input=>input.value);
+      const selection=()=>Object.fromEntries([...callForm.querySelectorAll('select[name^="call:"]')].map(input=>[input.name.slice(5),input.value]));
+      const initial=JSON.stringify(selection());
       const renderCall=()=>{
-        const published=event.callStatus==='Publicada';
-        c.querySelector('#activityCallStatus').textContent=`Convocatoria ${published?'publicada':'en borrador'} · ${event.called.length} seleccionados`;
-        publish.textContent=published?'Volver a borrador':'Publicar convocatoria';
-        const selected=selection();
-        const unsaved=selected.length!==event.called.length||selected.some(id=>!event.called.includes(id));
-        publish.disabled=!published&&(!selected.length||unsaved);
-        publish.title=!published&&unsaved?'Guarda la selección antes de publicar':'';
+        const states=selection(),values=Object.values(states);
+        c.querySelector('#activityCallStatus').textContent=values.filter(value=>value==='Convocado').length+' convocados · '+values.filter(value=>value==='Preconvocado').length+' preconvocados';
+        publish.textContent=event.callStatus==='Publicada'?'Pasar todos a preconvocados':'Convocar a todos los preconvocados';
+        publish.disabled=JSON.stringify(states)!==initial||!values.some(value=>value!=='No convocado');
       };
-      event.called=called;
-      renderCall();
-      callForm.onchange=renderCall;
+      renderCall();callForm.onchange=renderCall;
       publish.onclick=async()=>{
-        const callStatus=event.callStatus==='Publicada'?'Borrador':'Publicada';
+        const states=selection(),next=event.callStatus==='Publicada'?'Preconvocado':'Convocado';
+        Object.keys(states).forEach(id=>{if(states[id]!=='No convocado')states[id]=next;});
         publish.disabled=true;
-        try{
-          await api('/events/'+event.id+'/details','POST',{callStatus});
-          event.callStatus=callStatus;
-          message(callStatus==='Publicada'?'Convocatoria publicada.':'Convocatoria en borrador.');
-        }catch(error){message(error.message);}
-        finally{renderCall();}
+        try{await api('/events/'+event.id+'/call','POST',{states});await calendarPage(c,event.id);message('Convocatoria actualizada.');}
+        catch(error){message(error.message);renderCall();}
       };
-      bindForm('calendarCall',async f=>{
-        const users=selection();
-        await api('/events/'+event.id+'/call','POST',{users});
-        event.called=users;
-        renderCall();
-        f.closest('details').querySelector('summary').textContent='Abrir corredores para convocar · '+users.length+' seleccionados';
-        await refreshHotelGuests(c.querySelector('#hotelGuests'),event.id);
-        message('Selección guardada.');
+      bindForm('calendarCall',async()=>{
+        await api('/events/'+event.id+'/call','POST',{states:selection()});
+        await calendarPage(c,event.id);message('Convocatoria guardada.');
       });
       const panels={call:c.querySelector('#activityCallPanel'),travel:c.querySelector('#eventTravelPanel'),expenses:c.querySelector('#eventExpensePanel')};
       const buttons=[...c.querySelectorAll('[data-activity-section]')];

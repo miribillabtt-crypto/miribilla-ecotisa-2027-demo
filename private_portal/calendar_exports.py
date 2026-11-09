@@ -59,7 +59,7 @@ def register_calendar_exports(app, Record, unseal, audit, require):
         count = 0
         for record in g.db.scalars(select(Record).where(Record.kind == 'event').order_by(Record.id)):
             event = unseal(record.data)
-            selected = g.user.id in event.get('called', [])
+            selected = g.user.id in event.get('called', []) or g.user.id in event.get('precalled', [])
             if scope == 'selected' and not selected:
                 continue
             try:
@@ -71,7 +71,7 @@ def register_calendar_exports(app, Record, unseal, audit, require):
             description = ''
             title = event['name']
             if g.user.role == 'runner':
-                state = ('Convocado' if event.get('callStatus') == 'Publicada' else 'Preconvocado') if selected else 'No convocado'
+                state = ('Convocado' if event.get('callStatus') == 'Publicada' and g.user.id in event.get('called', []) else 'Preconvocado') if selected else 'No convocado'
                 answer = g.db.get(Record, sha256((record.id + ':' + g.user.id).encode()).hexdigest())
                 availability = unseal(answer.data)['status'] if answer else 'Pendiente de responder'
                 title += ' · ' + state

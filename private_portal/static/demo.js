@@ -147,7 +147,7 @@ window.DemoPortal=(()=>{
    if(parts[2]==='availability'){state.answers[event.id]??={};state.answers[event.id][user.id]=data.status;}
    else if(parts[2]==='archive')event.archived=true;
    else if(parts[2]==='details')Object.assign(event,data);
-   else if(parts[2]==='call')event.called=data.users;
+   else if(parts[2]==='call'){if(data.states){event.called=Object.keys(data.states).filter(id=>data.states[id]==='Convocado');event.precalled=Object.keys(data.states).filter(id=>data.states[id]==='Preconvocado');event.callStatus=event.called.length?'Publicada':'Borrador';}else{event.called=data.users;event.precalled=[];}}
    else if(parts[2]==='split-expenses'){
     const total=data.expenses.reduce((sum,expense)=>sum+(state.modules.entry.find(row=>row.id===expense)?.amount||0),0);
     data.expenses.forEach(expense=>{state.modules.entry.find(row=>row.id===expense).splitRecorded=true;});

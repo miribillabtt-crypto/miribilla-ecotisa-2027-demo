@@ -436,8 +436,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if d.get('callStatus')=='Publicada':
    if not out.get('called'):abort(400,'Selecciona corredores antes de publicar')
    for rid in out['called']:
-    a=g.db.get(Record,__import__('hashlib').sha256((event_id+':'+rid).encode()).hexdigest())
-    if not a or unseal(a.data).get('status')!='Disponible':abort(400,'Revisa la disponibilidad de los convocados')
+    rider=g.db.get(User,rid)
+    if not rider or not rider.active or rider.role!='runner':abort(400,'Revisa los corredores seleccionados')
   if travel_range(out)!=previous_dates:
    for travel in rows('travel'):
     data=unseal(travel.data)

@@ -232,18 +232,18 @@ def test_clothes_export_defaults_and_registered_quantities(env):
  assert runner.get('/api/clothes/mine?user='+ids['runner2']).json['quantities']['Maillot corto']==2
  assert other.get('/api/clothes/mine').json['quantities']['Chaleco']==0
 
-def test_call_requires_available_runner(env):
+def test_direction_call_is_independent_of_availability(env):
  app,ids,login,_=env;c,h=login('director');assert c.post('/api/events',json={'name':'Carrera','date':'2027-02-01','place':'Bilbao'},headers=h).status_code==200
- eid=c.get('/api/events').json['events'][0]['id'];assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==400
+ eid=c.get('/api/events').json['events'][0]['id'];assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
  r,rh=login('runner')
  assert r.post('/api/events/'+eid+'/availability',json={'status':'Por confirmar'},headers=rh).status_code==400
  assert r.post('/api/events/'+eid+'/availability',json={'status':'No disponible'},headers=rh).status_code==200
- assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==400
+ assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
  assert r.post('/api/events/'+eid+'/availability',json={'status':'Disponible'},headers=rh).status_code==200
  assert c.post('/api/events/'+eid+'/call',json={'users':[ids['runner']]},headers=h).status_code==200
  assert c.get('/api/events').json['events'][0]['responses'][ids['runner']]=='Disponible'
  assert r.post('/api/events/'+eid+'/availability',json={'status':'No disponible'},headers=rh).status_code==200
- assert c.post('/api/events/'+eid+'/details',json={'callStatus':'Publicada'},headers=h).status_code==400
+ assert c.post('/api/events/'+eid+'/details',json={'callStatus':'Publicada'},headers=h).status_code==200
 
 def test_private_team_and_rider_calendar_exports(env):
  app,ids,login,_=env
@@ -1027,3 +1027,25 @@ def test_direction_can_remove_and_restore_fines_and_update_accounts(env):
  restored=runner.get('/api/fines').json['fines'][0]
  assert restored['note']=='Prueba recuperable' and restored['status']==fine['status']
  assert runner.get('/api/accounts').json['totals']['fines']==500
+
+def test_individual_call_states_keep_availability_and_exports(env):
+ app,ids,login,_=env
+ director,h=login('director');runner,rh=login('runner');other,oh=login('runner2')
+ assert director.post('/api/events',json={'name':'Convocatoria mixta','date':'2027-07-01'},headers=h).status_code==200
+ event=next(e for e in director.get('/api/events').json['events'] if e['name']=='Convocatoria mixta');path='/api/events/'+event['id']
+ assert runner.post(path+'/availability',json={'status':'No disponible'},headers=rh).status_code==200
+ states={ids['runner']:'Convocado',ids['runner2']:'Preconvocado'}
+ assert runner.post(path+'/call',json={'states':states},headers=rh).status_code==403
+ assert director.post(path+'/call',json={'states':states},headers=h).status_code==200
+ event=next(e for e in director.get('/api/events').json['events'] if e['id']==event['id'])
+ assert event['called']==[ids['runner']] and event['precalled']==[ids['runner2']] and event['callStatus']=='Publicada'
+ assert event['responses'][ids['runner']]=='No disponible' and ids['runner2'] not in event['responses']
+ assert 'Preconvocado' in other.get('/api/calendar.ics?scope=selected').text
+ assert 'Convocado' in runner.get('/api/calendar.ics?scope=selected').text
+ assert director.post(path+'/call',json={'states':{ids['technician']:'Convocado'}},headers=h).status_code==400
+ assert director.post(path+'/call',json={'states':{ids['runner']:'Inventado'}},headers=h).status_code==400
+ states[ids['runner']]='No convocado'
+ assert director.post(path+'/call',json={'states':states},headers=h).status_code==200
+ event=next(e for e in director.get('/api/events').json['events'] if e['id']==event['id'])
+ assert event['called']==[] and event['precalled']==[ids['runner2']]
+ assert 'BEGIN:VEVENT' not in runner.get('/api/calendar.ics?scope=selected').text

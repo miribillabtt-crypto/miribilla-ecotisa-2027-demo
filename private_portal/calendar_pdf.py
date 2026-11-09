@@ -15,7 +15,7 @@ MONTHS = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agost
 def calendar_pdf(events, personal=False, runner_id=None):
     groups = defaultdict(list)
     for event in events:
-        if personal and runner_id not in event.get('called', []):
+        if personal and runner_id not in event.get('called', []) and runner_id not in event.get('precalled', []):
             continue
         try:
             start = date.fromisoformat(event.get('date') or '')
@@ -56,8 +56,8 @@ def calendar_pdf(events, personal=False, runner_id=None):
             if event.get('type'):
                 details += ' · ' + event['type']
             if runner_id:
-                selected = runner_id in event.get('called', [])
-                details += '\n' + (('Convocado' if event.get('callStatus') == 'Publicada' else 'Preconvocado') if selected else 'No convocado')
+                selected = runner_id in event.get('called', []) or runner_id in event.get('precalled', [])
+                details += '\n' + (('Convocado' if event.get('callStatus') == 'Publicada' and runner_id in event.get('called', []) else 'Preconvocado') if selected else 'No convocado')
             data.append([p(dates), p(event.get('name', 'Actividad') + ('\n' + event['place'] if event.get('place') else '')), p(details)])
         table = Table(data, colWidths=[39*mm, 85*mm, 54*mm], repeatRows=1, hAlign='LEFT')
         table.setStyle(TableStyle([('BACKGROUND', (0,0), (-1,0), colors.HexColor('#e7edff')), ('VALIGN',(0,0),(-1,-1),'TOP'), ('LEFTPADDING',(0,0),(-1,-1),7), ('RIGHTPADDING',(0,0),(-1,-1),7), ('TOPPADDING',(0,0),(-1,-1),8), ('BOTTOMPADDING',(0,0),(-1,-1),8), ('LINEBELOW',(0,0),(-1,-1),0.4,colors.HexColor('#d6dfed'))]))

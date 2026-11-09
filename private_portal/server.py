@@ -571,12 +571,24 @@ def create_app(test_config=None):
     def call(event_id):
         r=g.db.get(Record,event_id,with_for_update=True)
         if not r or r.kind!='event':abort(404)
-        ids=body().get('users')
-        if not isinstance(ids,list) or len(ids)>100:abort(400)
+        payload=body();states=payload.get('states');data=unseal(r.data)
+        if states is not None:
+            if not isinstance(states,dict) or len(states)>100:abort(400)
+            if any(value not in ('No convocado','Preconvocado','Convocado') for value in states.values()):abort(400)
+            ids=list(states)
+        else:
+            ids=payload.get('users')
+        if not isinstance(ids,list) or len(ids)>100 or any(not isinstance(target,str) for target in ids):abort(400)
         for target in ids:
-            u=g.db.get(User,target);a=g.db.get(Record,digest(event_id+':'+target))
-            if not u or not u.active or u.role!='runner' or not a or unseal(a.data)['status']!='Disponible':abort(400,'El corredor debe indicar Disponible antes de convocarlo')
-        data=unseal(r.data);data['called']=list(dict.fromkeys(ids));r.data=seal(data);audit('call_updated',event_id);return jsonify(ok=True)
+            u=g.db.get(User,target)
+            if not u or not u.active or u.role!='runner':abort(400,'Selecciona un corredor activo')
+        if states is not None:
+            data['called']=[target for target,value in states.items() if value=='Convocado']
+            data['precalled']=[target for target,value in states.items() if value=='Preconvocado']
+            data['callStatus']='Publicada' if data['called'] else 'Borrador'
+        else:
+            data['called']=list(dict.fromkeys(ids));data['precalled']=[]
+        r.data=seal(data);audit('call_updated',event_id);return jsonify(ok=True)
     @app.get('/api/roster')
     @require()
     def roster():
