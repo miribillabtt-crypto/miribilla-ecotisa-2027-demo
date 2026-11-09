@@ -1009,3 +1009,21 @@ def test_direction_removes_and_restores_event_without_losing_linked_data(env):
  restored=next(e for e in runner.get('/api/events').json['events'] if e['id']==event['id'])
  assert restored['called']==[ids['runner']] and restored['date']=='2027-07-04'
  assert any(r['event']==event['id'] and r['amount']==1200 for r in director.get('/api/modules/entry').json['records'])
+
+def test_direction_can_remove_and_restore_fines_and_update_accounts(env):
+ app,ids,login,_=env
+ director,h=login('director');runner,rh=login('runner')
+ assert director.post('/api/fines',json={'user':ids['runner'],'type':0,'note':'Prueba recuperable'},headers=h).status_code==200
+ fine=director.get('/api/fines').json['fines'][0]
+ assert runner.get('/api/accounts').json['totals']['fines']==500
+ path='/api/fines/'+fine['id']+'/archive'
+ assert runner.post(path,json={},headers=rh).status_code==403
+ assert director.post(path,json={},headers=h).status_code==200
+ assert director.post(path,json={},headers=h).status_code==200
+ assert runner.get('/api/fines').json['fines']==[]
+ assert runner.get('/api/accounts').json['totals']['fines']==0
+ assert any(r['id']==fine['id'] and r['kind']=='fine' for r in director.get('/api/archive').json['records'])
+ assert director.post('/api/archive/'+fine['id']+'/restore',json={},headers=h).status_code==200
+ restored=runner.get('/api/fines').json['fines'][0]
+ assert restored['note']=='Prueba recuperable' and restored['status']==fine['status']
+ assert runner.get('/api/accounts').json['totals']['fines']==500

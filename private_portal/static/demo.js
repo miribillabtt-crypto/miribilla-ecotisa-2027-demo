@@ -112,7 +112,7 @@ window.DemoPortal=(()=>{
     return copy({records});
    }
    if(path==='/shop')return copy({products:garments.map(name=>({name,price:2000})),orders:state.orders.filter(order=>role!=='runner'||order.rider===user.id),director:'demo-director',directors:[people[0]]});
-   if(path==='/fines')return copy({fines:state.fines.filter(fine=>role!=='runner'||fine.user===user.id)});
+   if(path==='/fines')return copy({fines:state.fines.filter(fine=>!fine.archived&&(role!=='runner'||fine.user===user.id))});
    if(path==='/accounts'){
     const riders=people.filter(person=>person.role==='runner'&&(role!=='runner'||person.id===user.id)).map(person=>{
      const row={id:person.id,name:person.name,clothes:0,races:0,fines:0,other:0,total:0,paid:0,pending:0};
@@ -120,7 +120,7 @@ window.DemoPortal=(()=>{
       row[charge.concept?.includes('ropa')?'clothes':charge.event?'races':'other']+=charge.amount;
       row.total+=charge.amount;row[charge.status==='Pagado'?'paid':'pending']+=charge.amount;
      }
-     for(const fine of state.fines.filter(item=>item.user===person.id&&item.status!=='Anulada')){
+     for(const fine of state.fines.filter(item=>!item.archived&&item.user===person.id&&item.status!=='Anulada')){
       if(typeof fine.amount!=='number')continue;
       row.fines+=fine.amount*100;row.total+=fine.amount*100;row[fine.status==='Pagada'?'paid':'pending']+=fine.amount*100;
      }
@@ -130,7 +130,7 @@ window.DemoPortal=(()=>{
     return {riders,totals};
    }
    if(path==='/audit')return {entries:[]};
-   if(path==='/archive')return copy({records:state.events.filter(event=>event.archived).map(event=>({...event,kind:'event'}))});
+   if(path==='/archive')return copy({records:[...state.events.filter(event=>event.archived).map(event=>({...event,kind:'event'})),...state.fines.filter(fine=>fine.archived).map(fine=>({...fine,kind:'fine'}))]});
    if(path==='/resource-availability')return {records:[]};
    if(path==='/bank/reconciliation')return {movements:[]};
    if(path==='/media/roster')return copy({riders:people.filter(person=>person.role==='runner').map(({id,name})=>({id,name,photos:[]}))});
@@ -140,7 +140,7 @@ window.DemoPortal=(()=>{
   if(path==='/logout'){stop();return {ok:true};}
   if(parts[0]==='profile'){Object.assign(state.profiles[parts[1]],data);return {ok:true};}
   if(path==='/events'){const event={...data,id:id(),called:[],callStatus:'Borrador'};state.events.push(event);return {ok:true};}
-  if(parts[0]==='archive'&&parts[2]==='restore'){const event=state.events.find(item=>item.id===parts[1]);if(event)event.archived=false;return {ok:true};}
+  if(parts[0]==='archive'&&parts[2]==='restore'){const event=state.events.find(item=>item.id===parts[1]);if(event)event.archived=false;const fine=state.fines.find(item=>item.id===parts[1]);if(fine)fine.archived=false;return {ok:true};}
   if(parts[0]==='events'){
    const event=state.events.find(item=>item.id===parts[1]);
    if(!event)throw Error('Actividad de ejemplo no encontrada');
@@ -171,7 +171,7 @@ window.DemoPortal=(()=>{
    return copy(order);
   }
   if(path==='/fines'){state.fines.push({id:id(),user:data.user,reason:'Multa de demostración',amount:5,date:'2027-02-27',status:'Pendiente'});return {ok:true};}
-  if(parts[0]==='fines'){Object.assign(state.fines.find(fine=>fine.id===parts[1]),data);return {ok:true};}
+  if(parts[0]==='fines'){const fine=state.fines.find(fine=>fine.id===parts[1]);if(parts[2]==='archive')fine.archived=true;else Object.assign(fine,data);return {ok:true};}
   throw Error('Acción de demostración. Puedes consultar los paneles y editar los datos de ejemplo.');
  }
  restore();

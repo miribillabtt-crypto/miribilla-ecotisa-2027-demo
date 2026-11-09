@@ -571,14 +571,20 @@ async function finesPage(c){
     <small>Las faltas graves se registran para decisión de Dirección; no eliminan automáticamente al corredor.</small>
     <button type="submit" class="primary">Registrar multa</button></form>`:''}
   ${rows.length?`<div class="card scroll"><table><thead><tr>
-    <th>Fecha</th>${director?'<th>Corredor</th>':''}<th>Motivo</th><th>Importe</th><th>Estado</th>
+    <th>Fecha</th>${director?'<th>Corredor</th>':''}<th>Motivo</th><th>Importe</th><th>Estado</th>${director?'<th>Acciones</th>':''}
    </tr></thead><tbody>${rows.map(fine=>`<tr><td>${esc(fine.date)}</td>
     ${director?`<td>${esc(riders.find(rider=>rider.id===fine.user)?.name||'Corredor')}</td>`:''}
     <td>${esc(fine.reason)}</td><td>${typeof fine.amount==='number'?fine.amount+' €':esc(fine.amount)}</td>
     <td>${esc(fine.status)}${director?`<select data-fine-status="${esc(fine.id)}" aria-label="Estado de la multa">
       ${['Pendiente','Pagada','Anulada','Pendiente de decisión','Resuelta'].map(status=>`<option ${status===fine.status?'selected':''}>${status}</option>`).join('')}
-    </select>`:''}</td></tr>`).join('')}</tbody></table></div>`:
+    </select>`:''}</td>${director?`<td><button type="button" data-remove-fine="${esc(fine.id)}">Eliminar</button></td>`:''}</tr>`).join('')}</tbody></table></div>`:
     `<div class="card">${personal?'No tienes multas registradas.':'No hay multas registradas.'}</div>`}`;
+ c.querySelectorAll('[data-remove-fine]').forEach(button=>button.onclick=async()=>{
+  if(!confirm('¿Eliminar esta multa? Dejará de aparecer al corredor y de sumar en su cuenta. Podrás recuperarla desde Archivados.'))return;
+  button.disabled=true;
+  try{await api('/fines/'+encodeURIComponent(button.dataset.removeFine)+'/archive','POST',{});await finesPage(c);message('Multa eliminada. La cuenta del corredor se ha actualizado.');}
+  catch(error){button.disabled=false;message(error.message);}
+ });
  c.querySelectorAll('[data-fine-status]').forEach(select=>select.onchange=async()=>{
   try{
    await api('/fines/'+select.dataset.fineStatus+'/status','POST',{status:select.value});

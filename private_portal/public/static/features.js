@@ -1,5 +1,5 @@
 'use strict';
-const moduleLabels={event:'Carrera o actividad',staff:'Técnicos',vehicle:'Vehículos',travel:'Viajes, hoteles e inscripciones',result:'Resultados',days:'Días de actividad',entry:'CONTA · Ingresos y gastos',budget:'Presupuesto',bank:'Banco y conciliación',charge:'Liquidaciones por corredor',license:'Licencias',sport:'Material y medidas',post:'Publicaciones'};
+const moduleLabels={fine:'Multa',event:'Carrera o actividad',staff:'Técnicos',vehicle:'Vehículos',travel:'Viajes, hoteles e inscripciones',result:'Resultados',days:'Días de actividad',entry:'CONTA · Ingresos y gastos',budget:'Presupuesto',bank:'Banco y conciliación',charge:'Liquidaciones por corredor',license:'Licencias',sport:'Material y medidas',post:'Publicaciones'};
 const moduleSpecs={
  staff:[['name','Nombre'],['function','Función'],['city','Población'],['phone','Teléfono'],['user','Usuario técnico','person?'],['notes','Observaciones','textarea']],
  vehicle:[['name','Vehículo'],['plate','Matrícula'],['seats','Plazas','integer'],['driver','Conductor habitual'],['notes','Observaciones','textarea']],
@@ -562,7 +562,7 @@ async function callsPage(c){
  bindNameSearch(c.querySelector('#callsSearch'),c.querySelector('#callsResults'));
  c.querySelectorAll('[data-planning]').forEach(button=>button.onclick=()=>navigate('planning'));
 }
-async function archivePage(c){const d=await api('/archive');c.innerHTML='<h1>Registros archivados</h1><div class="card">'+(d.records.map(r=>`<div class="row"><span>${esc(moduleLabels[r.kind]||r.kind)} · ${esc(r.name||r.concept||r.hotel||r.number||r.date||r.id)}</span><button data-restore="${r.id}">Restaurar</button></div>`).join('')||'No hay registros archivados.')+'</div>';c.querySelectorAll('[data-restore]').forEach(b=>b.onclick=async()=>{try{await api('/archive/'+b.dataset.restore+'/restore','POST',{});await archivePage(c);}catch(e){message(e.message);}});}
+async function archivePage(c){const d=await api('/archive');c.innerHTML='<h1>Registros archivados</h1><div class="card">'+(d.records.map(r=>`<div class="row"><span>${esc(moduleLabels[r.kind]||r.kind)} · ${esc(r.name||r.concept||r.reason||r.hotel||r.number||r.date||r.id)}</span><button data-restore="${r.id}">Restaurar</button></div>`).join('')||'No hay registros archivados.')+'</div>';c.querySelectorAll('[data-restore]').forEach(b=>b.onclick=async()=>{try{await api('/archive/'+b.dataset.restore+'/restore','POST',{});await archivePage(c);}catch(e){message(e.message);}});}
 async function bankPanel(container){
  const {movements=[]}=await api('/bank/reconciliation');
  const groups=[
