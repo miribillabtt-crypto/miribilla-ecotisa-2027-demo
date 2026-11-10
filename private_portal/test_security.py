@@ -501,7 +501,8 @@ def test_import_roster_creates_private_individual_profiles(env):
  riders=[r for r in roster if r['name'].endswith('De Prueba')]
  assert len(riders)==2
  rider=next(r for r in riders if r['name']=='Nombre De Prueba')
- assert set(rider)=={'id','name'}
+ assert set(rider)=={'id','name','birthYear'}
+ assert rider['birthYear']=='2009'
  path='/api/profile/'+rider['id']
  profile=director.get(path).json['profile']
  assert profile['birthYear']=='2009' and profile['dni']=='00000000T'
@@ -1093,3 +1094,25 @@ def test_invoice_payer_club_validation_preservation_and_export(env):
  assert sheet.cell(2,header.index('Importe (€)')+1).value==123.45
  assert director.post('/api/modules/entry',json=legacy,headers=h).status_code==200
  assert any(r.get('payerClub')=='' for r in director.get('/api/modules/entry').json['records'])
+
+def test_roster_birth_year_and_2026_competition_days(env):
+ _,ids,login,_=env
+ director,h=login('director')
+ limited,lh=login('director_limited')
+ runner,rh=login('runner')
+ technician,_=login('technician')
+ profile='/api/profile/'+ids['runner']
+ assert director.post(profile,json={'birthYear':'2010','competitionDays2026':35,'helmet':'M / 54–58 cm'},headers=h).status_code==200
+ assert next(r for r in director.get('/api/roster').json['riders'] if r['id']==ids['runner'])['birthYear']=='2010'
+ assert next(r for r in limited.get('/api/roster').json['riders'] if r['id']==ids['runner'])['birthYear']=='2010'
+ assert all('birthYear' not in r for r in technician.get('/api/roster').json['riders'])
+ assert limited.get(profile).json['profile']['competitionDays2026']==35
+ assert runner.get(profile).json['profile']['helmet']=='M / 54–58 cm'
+ for value in [-1,367,2.5,True,'30']:
+  assert director.post(profile,json={'competitionDays2026':value},headers=h).status_code==400
+ assert limited.post(profile,json={'competitionDays2026':0},headers=lh).status_code==200
+ assert runner.get(profile).json['profile']['competitionDays2026']==0
+ assert runner.post(profile,json={'competitionDays2026':''},headers=rh).status_code==200
+ assert runner.get(profile).json['profile']['competitionDays2026']==''
+ assert director.post(profile,json={'birthYear':'','birth':'2009-03-14'},headers=h).status_code==200
+ assert next(r for r in director.get('/api/roster').json['riders'] if r['id']==ids['runner'])['birthYear']=='2009'

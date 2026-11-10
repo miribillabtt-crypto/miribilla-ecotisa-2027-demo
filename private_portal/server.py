@@ -423,13 +423,13 @@ def create_app(test_config=None):
     @require('director','runner')
     def profile(target):
         u=runner_target(target);p=unseal(u.profile)
-        if g.user.id!=target and not g.user.documents:p={k:v for k,v in p.items() if k in ('sizes','quantities','coach','club','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar')}
+        if g.user.id!=target and not g.user.documents:p={k:v for k,v in p.items() if k in ('sizes','quantities','coach','club','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar','competitionDays2026')}
         audit('profile_read',target);return jsonify(profile=p)
     @app.post('/api/profile/<target>')
     @require('director','runner')
     def profile_save(target):
         u=runner_target(target);d=body();p=unseal(u.profile)
-        allowed={'coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
+        allowed={'competitionDays2026','coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
         if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus','medicationStatus','medicationDetails','allergiesStatus','allergiesDetails','intolerancesStatus','intolerancesDetails'}
         if g.user.role=='director':allowed|={'quantities'}
         for k,v in d.items():
@@ -438,6 +438,8 @@ def create_app(test_config=None):
                 if not isinstance(v,dict) or any(key not in CLOTHES for key in v):abort(400)
                 if k=='sizes' and any(val not in ['','XXS','XS','S','M','L','XL','XXL','XXXL'] for val in v.values()):abort(400)
                 if k=='quantities' and any(type(val)!=int or val<0 or val>100 for val in v.values()):abort(400)
+            elif k=='competitionDays2026':
+                if v!='' and (type(v)!=int or not 0<=v<=365):abort(400,'Días de competición: indica un entero entre 0 y 365')
             elif k in ('medicationStatus','allergiesStatus','intolerancesStatus'):
                 if v not in ('','Sí','No'):abort(400,'Selecciona Sí o No')
             elif k=='photoConsent':
@@ -595,7 +597,17 @@ def create_app(test_config=None):
         # Never serialize ORM users: sensitive columns are deliberately excluded.
         inactive=request.args.get('status')=='inactive'
         if inactive and g.user.role!='director':abort(403)
-        return jsonify(riders=[{'id':u.id,'name':u.name} for u in g.db.scalars(select(User).where(User.role=='runner',User.active== (not inactive)).order_by(User.name))] if g.user.role in ('director','communication','technician') else [{'id':g.user.id,'name':g.user.name}])
+        if g.user.role not in ('director','communication','technician'):
+            return jsonify(riders=[{'id':g.user.id,'name':g.user.name}])
+        riders=[]
+        for u in g.db.scalars(select(User).where(User.role=='runner',User.active== (not inactive)).order_by(User.name)):
+            item={'id':u.id,'name':u.name}
+            if g.user.role=='director':
+                profile=unseal(u.profile)
+                year=str(profile.get('birthYear') or str(profile.get('birth') or '')[:4]).strip()
+                item['birthYear']=year if len(year)==4 and year.isdigit() else ''
+            riders.append(item)
+        return jsonify(riders=riders)
     @app.post('/api/roster/<target>/status')
     @require('director')
     def rider_status(target):
