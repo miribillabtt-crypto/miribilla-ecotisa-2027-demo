@@ -97,6 +97,10 @@ function bindNameSearch(input,container){
   input.oninput();
 }
 
+function availabilityChecks(riderId,status){
+ const selected=['Disponible','No disponible'].includes(status)?status:'Pendiente de respuesta';
+ return `<fieldset><legend>Disponibilidad del corredor</legend>${['Disponible','No disponible','Pendiente de respuesta'].map(value=>`<label class="checkline"><input type="radio" name="response:${esc(riderId)}" disabled ${value===selected?'checked':''}>${value}</label>`).join('')}</fieldset>`;
+}
 function setAllCallStates(form,state){
  if(!['No convocado','Preconvocado','Convocado'].includes(state))throw Error('Estado de convocatoria no válido');
  form.querySelectorAll('select[name^="call:"]').forEach(input=>{input.value=state;});
@@ -214,13 +218,13 @@ async function calendarPage(c,selectedId){
         <button type="button" data-activity-section="expenses" aria-pressed="false">Gastos y cobros</button>
       </div>
       <section class="card" id="activityCallPanel">
-      <h2>Convocatoria</h2>
+      <h2>Convocatoria</h2><button type="button" id="refreshCallResponses">Actualizar respuestas de disponibilidad</button>
       <div class="toolbar"><span class="pill" id="activityCallStatus"></span>
         <button type="button" id="activityPublish"></button>
         <a class="button" href="/api/events/${encodeURIComponent(event.id)}/package">Descargar convocatoria y paquete hotel</a>
       </div>
       <details class="event-call"><summary id="callSelectionSummary">Abrir corredores para convocar</summary>
-      <form method="post" id="calendarCall"><p>La disponibilidad es informativa: puedes decidir la convocatoria aunque no haya respuesta o figure No disponible.</p><div class="toolbar"><button type="button" data-bulk-call="Convocado">Seleccionar todos · Convocar</button><button type="button" data-bulk-call="Preconvocado">Preconvocar a todos</button><button type="button" data-bulk-call="No convocado">Quitar selección de todos</button></div><small>Puedes ajustar cada corredor después. Pulsa Guardar convocatoria para aplicar los cambios.</small>${riders.map(r=>`<div class="card"><strong>${esc(r.name)}</strong><p>Disponibilidad: <strong>${esc(['Disponible','No disponible'].includes(responses[r.id])?responses[r.id]:'Sin responder')}</strong></p>${select('Convocatoria','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</div>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
+      <form method="post" id="calendarCall"><p>La disponibilidad es informativa: puedes decidir la convocatoria aunque no haya respuesta o figure No disponible.</p><div class="toolbar"><button type="button" data-bulk-call="Convocado">Seleccionar todos · Convocar</button><button type="button" data-bulk-call="Preconvocado">Preconvocar a todos</button><button type="button" data-bulk-call="No convocado">Quitar selección de todos</button></div><small>Puedes ajustar cada corredor después. Pulsa Guardar convocatoria para aplicar los cambios.</small>${riders.map(r=>`<div class="card"><strong>${esc(r.name)}</strong><div data-rider-response="${esc(r.id)}">${availabilityChecks(r.id,responses[r.id])}</div>${select('Convocatoria','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</div>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
       <button type="submit">Guardar convocatoria</button></form></details>
       </section><section class="card" id="eventTravelPanel" hidden></section><section class="card" id="eventExpensePanel" hidden></section>`:''}`;
     document.getElementById('backCalendar').onclick=()=>navigate(page);
@@ -230,6 +234,17 @@ async function calendarPage(c,selectedId){
       c.querySelector('#removeCalendarEvent').onclick=()=>removeCalendarEvent(c,event);
       const publish=c.querySelector('#activityPublish');
       const callForm=c.querySelector('#calendarCall');
+      c.querySelector('#refreshCallResponses').onclick=async e=>{
+        const button=e.currentTarget;button.disabled=true;
+        try{
+          const latest=(await api('/events')).events.find(item=>item.id===event.id);
+          if(!latest)throw Error('La actividad ya no está disponible');
+          c.querySelectorAll('[data-rider-response]').forEach(node=>{node.innerHTML=availabilityChecks(node.dataset.riderResponse,latest.responses?.[node.dataset.riderResponse]);});
+          message('Respuestas de disponibilidad actualizadas.');
+        }catch(error){message(error.message);}
+        finally{button.disabled=false;}
+      };
+
       const selection=()=>Object.fromEntries([...callForm.querySelectorAll('select[name^="call:"]')].map(input=>[input.name.slice(5),input.value]));
       const initial=JSON.stringify(selection());
       const renderCall=()=>{
