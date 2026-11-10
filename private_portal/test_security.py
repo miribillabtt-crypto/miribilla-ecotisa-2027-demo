@@ -1116,3 +1116,36 @@ def test_roster_birth_year_and_2026_competition_days(env):
  assert runner.get(profile).json['profile']['competitionDays2026']==''
  assert director.post(profile,json={'birthYear':'','birth':'2009-03-14'},headers=h).status_code==200
  assert next(r for r in director.get('/api/roster').json['riders'] if r['id']==ids['runner'])['birthYear']=='2009'
+
+def test_monthly_club_settlement_criteria_dates_and_access(env):
+ from openpyxl import load_workbook
+ from club_settlement import monthly_settlement
+ _,_,login,_=env
+ director,h=login('director');runner,_=login('runner');tech,_=login('technician')
+ base=dict(direction='Gasto',date='2027-01-28',paymentDate='2027-02-02',concept='Hotel',amount=10001,status='Pagado',payerClub='Miribilla',paidBy='Alex',allocationRule='Mitad',miribillaPercent=50)
+ for bad in [dict(allocationRule='Inventado'),dict(miribillaPercent=101),dict(paymentDate='2027-02-30')]:
+  assert director.post('/api/modules/entry',json={**base,**bad},headers=h).status_code==400
+ for extra in [{},dict(amount=4000,payerClub='Ecotisa',paidBy='Alfonso',allocationRule='Miribilla'),dict(amount=3000,allocationRule='Personalizado',miribillaPercent=30),dict(amount=2000,allocationRule='Ecotisa'),dict(amount=900,paymentDate='2027-03-02'),dict(amount=700,paidBy=''),dict(amount=600,allocationRule=''),dict(amount=500,status='Pendiente'),dict(amount=400,date='',paymentDate='')]:
+  assert director.post('/api/modules/entry',json={**base,**extra},headers=h).status_code==200
+ path='/api/club-settlement?month=2027-02'
+ assert runner.get(path).status_code==403 and tech.get(path).status_code==403
+ result=director.get(path).json
+ assert len(result['entries'])==4 and len(result['pending'])==4
+ assert result['total']==19001
+ assert result['totals']['Miribilla']==dict(paid=15001,share=9901,balance=5100)
+ assert result['totals']['Ecotisa']==dict(paid=4000,share=9100,balance=-5100)
+ assert result['transfer']==dict(fromClub='Ecotisa',toClub='Miribilla',amount=5100)
+ assert director.get('/api/club-settlement?month=2027-01').json['total']==0
+ assert director.get('/api/club-settlement?month=2027-13').status_code==400
+ wb=load_workbook(io.BytesIO(director.get('/api/club-settlement/export?month=2027-02').data))
+ assert wb['Liquidación mensual']['B3'].value==150.01
+ assert wb['Facturas incluidas'].max_row==5
+ assert wb['Pendientes de revisar'].max_row==5
+ # Reports are reproducible and never record a financial transfer.
+ assert director.get(path).json==result
+ records=director.get('/api/modules/entry').json['records'];row=next(r for r in records if r['amount']==10001)
+ legacy=dict(direction='Gasto',amount=10001,status='Pagado')
+ assert director.post('/api/modules/entry/'+row['id'],json=legacy,headers=h).status_code==200
+ updated=next(r for r in director.get('/api/modules/entry').json['records'] if r['id']==row['id'])
+ assert updated['paidBy']=='Alex' and updated['allocationRule']=='Mitad' and updated['paymentDate']=='2027-02-02'
+ assert all(r['shares']['Miribilla']+r['shares']['Ecotisa']==r['amount'] for r in result['entries'])

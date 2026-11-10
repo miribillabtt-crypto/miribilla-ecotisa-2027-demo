@@ -13,7 +13,7 @@ SPECS={
  'travel':dict(event='event',manager='s',hotel='s',hotelAddress='s',hotelPhone='s',booking='s',departureBilbao='s',departureZaragoza='s',meeting='s',plan='s',staff='staff[]',vehicles='vehicle[]',rooming='s',registrationDeadline='s',registrationStatus='s',registrationReference='s',routeUrl='url',scheduleUrl='url'),
  'result':dict(event='event',rider='runner',place='i',days='i',discipline='s',notes='s'),
  'days':dict(event='event',person='person',days='i',function='s',notes='s'),
- 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',payerClub='club',notes='s'),
+ 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',payerClub='club',paidBy='s',paymentDate='date',allocationRule='allocation',miribillaPercent='i',notes='s'),
  'budget':dict(category='s',amount='money',notes='s'),
  'bank':dict(date='date',concept='s',reference='s',amount='money',direction='direction',matched='s'),
  'charge':dict(event='event?',rider='runner',concept='s',amount='money',status='s',notes='s'),
@@ -26,6 +26,8 @@ MONEY={'entry','budget','bank','charge'}
 LICENSE_SIDES={'licencia':'Anverso','licencia_reverso':'Reverso'}
 
 def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
+ from club_settlement import register_club_settlement
+ register_club_settlement(app,Record,unseal,require,audit)
  def rows(kind):return list(g.db.scalars(select(Record).where(Record.kind=='module:'+kind)))
  def license_documents(rider_id):
   documents=g.db.scalars(select(Document).where(Document.owner_id==rider_id,Document.kind.in_(list(LICENSE_SIDES)))
@@ -68,9 +70,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if not isinstance(d,dict) or set(d)-set(spec):abort(400,'Campos no válidos')
   for key,typ in spec.items():
    v=d.get(key,[] if typ.endswith('[]') else 0 if typ in ('i','money') else '')
-   if typ in ('s','url','date','direction','posttype','format','poststatus','club'):
+   if typ in ('s','url','date','direction','posttype','format','poststatus','club','allocation'):
     if not isinstance(v,str) or len(v)>2500:abort(400,'Revisa '+key)
     v=v.strip()
+    if typ=='allocation' and v not in ('','Miribilla','Ecotisa','Mitad','Personalizado'):abort(400,'Criterio de reparto no válido')
     if typ=='club' and v not in ('','Miribilla','Ecotisa'):abort(400,'Selecciona Miribilla o Ecotisa')
     if typ=='url' and v and not v.startswith('https://'):abort(400,'Los enlaces deben comenzar por https://')
     if typ=='date' and v:
@@ -110,7 +113,9 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
       r=g.db.get(Record,rid)
       if not r or r.kind!='module:'+ref:abort(400,'Recurso no válido')
    out[key]=v
-  if kind=='entry' and out['direction']!='Gasto':out['budget']=''
+  if kind=='entry':
+   if out['direction']!='Gasto':out['budget']=''
+   if out['miribillaPercent']>100:abort(400,'El porcentaje debe estar entre 0 y 100')
   if kind in ('staff','vehicle') and not out['name']:abort(400,'Indica el nombre')
   if kind in ('result','days') and out['days']<1:abort(400,'Indica al menos un día')
   if kind=='post':
@@ -311,7 +316,9 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   payload=body()
   previous=unseal(r.data) if kind=='entry' else None
   if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
-  if kind=='entry' and previous and 'payerClub' not in payload:payload['payerClub']=previous.get('payerClub','')
+  if kind=='entry' and previous:
+   for key in ('payerClub','paidBy','paymentDate','allocationRule','miribillaPercent'):
+    if key not in payload and key in previous:payload[key]=previous[key]
   data=validate(kind,payload,previous)
   if kind=='bank':validate_bank_link(Record,unseal,data,record_id)
   if kind=='travel':

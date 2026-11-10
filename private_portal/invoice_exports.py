@@ -69,7 +69,7 @@ def register_invoice_exports(app, Record, Document, cipher, unseal, audit, requi
         sheet.title = 'Relación de gastos'
         sheet.append(['Justificante', 'Fecha', 'Proveedor', 'NIF / CIF', 'N.º de factura',
                       'Concepto', 'Categoría', 'Actividad', 'Partida', 'Base (€)', 'IVA (€)',
-                      'Importe (€)', 'Estado', 'Archivos adjuntos', 'Club que paga'])
+                      'Importe (€)', 'Estado', 'Archivos adjuntos', 'Club que paga', 'Quién paga', 'Fecha de pago', 'Criterio de reparto', '% Miribilla personalizado'])
         for entry_id, data in entries:
             event = g.db.get(Record, data['event']) if data.get('event') else None
             budget = g.db.get(Record, data['budget']) if data.get('budget') else None
@@ -80,7 +80,7 @@ def register_invoice_exports(app, Record, Document, cipher, unseal, audit, requi
                 data.get('category', ''), unseal(event.data).get('name', '') if event else '',
                 unseal(budget.data).get('category', '') if budget else '',
                 data.get('baseAmount', 0) / 100, data.get('taxAmount', 0) / 100,
-                data.get('amount', 0) / 100, data.get('status', ''), count or 'Sin adjuntar', data.get('payerClub') or 'Sin asignar',
+                data.get('amount', 0) / 100, data.get('status', ''), count or 'Sin adjuntar', data.get('payerClub') or 'Sin asignar', data.get('paidBy',''), data.get('paymentDate',''), data.get('allocationRule',''), data.get('miribillaPercent',''),
             ])
             for cell in sheet[sheet.max_row]:
                 if isinstance(cell.value, str):
@@ -98,7 +98,7 @@ def register_invoice_exports(app, Record, Document, cipher, unseal, audit, requi
             cell.font = Font(bold=True, color='FFFFFF')
             cell.fill = PatternFill('solid', fgColor='173047')
             cell.alignment = Alignment(wrap_text=True)
-        for index, width in enumerate([15, 13, 29, 15, 18, 32, 17, 24, 23, 14, 13, 14, 15, 20], 1):
+        for index, width in enumerate([15, 13, 29, 15, 18, 32, 17, 24, 23, 14, 13, 14, 15, 20, 20, 25, 15, 24, 20], 1):
             sheet.column_dimensions[get_column_letter(index)].width = width
         sheet.append(['TOTAL'])
         for col in ('J', 'K', 'L'):

@@ -17,7 +17,7 @@ function directionSections(){
   ['Calendario',[['calendar','Calendario']]],
   ['Equipo',[['roster','Corredores'],['licenses','Licencias'],['equipment','Material y medidas'],['clothes','Pedido de ropa'],['shop','Tienda'],['results','Resultados'],['days','Días de actividad'],['fines','Multas']]],
   ['Técnicos y vehículos',[['resources','Técnicos y vehículos']]],
-  ['Contabilidad',[['conta','Ingresos y gastos'],['charges','Cobros por corredor'],['budgets','Presupuesto'],['bank','Banco y conciliación']]],
+  ['Contabilidad',[['conta','Ingresos y gastos'],['charges','Cobros por corredor'],['budgets','Presupuesto'],['clubsettlement','Liquidación mensual clubes'],['bank','Banco y conciliación']]],
   ['Comunicación',[['publications','Publicaciones'],['photos','Fotos autorizadas']]],
   ['Administración',[['users','Usuarios y accesos'],['archive','Archivados'],...(me.owner?[['audit','Registro de accesos']]:[])]],
  ];
