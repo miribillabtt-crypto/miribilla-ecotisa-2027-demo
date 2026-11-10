@@ -97,6 +97,10 @@ function bindNameSearch(input,container){
   input.oninput();
 }
 
+function setAllCallStates(form,state){
+ if(!['No convocado','Preconvocado','Convocado'].includes(state))throw Error('Estado de convocatoria no válido');
+ form.querySelectorAll('select[name^="call:"]').forEach(input=>{input.value=state;});
+}
 function riderCallState(event){
  if((event.precalled||[]).includes(me.id))return {label:'Preconvocado',style:'assigned'};
  if(!(event.called||[]).includes(me.id))return {label:'No convocado',style:'pending'};
@@ -215,8 +219,8 @@ async function calendarPage(c,selectedId){
         <button type="button" id="activityPublish"></button>
         <a class="button" href="/api/events/${encodeURIComponent(event.id)}/package">Descargar convocatoria y paquete hotel</a>
       </div>
-      <details class="event-call"><summary>Abrir corredores para convocar · ${called.length} seleccionados</summary>
-      <form method="post" id="calendarCall"><p>La disponibilidad es informativa: puedes decidir la convocatoria aunque no haya respuesta o figure No disponible.</p>${riders.map(r=>`<div class="card"><strong>${esc(r.name)}</strong><p>Disponibilidad: <strong>${esc(['Disponible','No disponible'].includes(responses[r.id])?responses[r.id]:'Sin responder')}</strong></p>${select('Convocatoria','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</div>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
+      <details class="event-call"><summary id="callSelectionSummary">Abrir corredores para convocar</summary>
+      <form method="post" id="calendarCall"><p>La disponibilidad es informativa: puedes decidir la convocatoria aunque no haya respuesta o figure No disponible.</p><div class="toolbar"><button type="button" data-bulk-call="Convocado">Seleccionar todos · Convocar</button><button type="button" data-bulk-call="Preconvocado">Preconvocar a todos</button><button type="button" data-bulk-call="No convocado">Quitar selección de todos</button></div><small>Puedes ajustar cada corredor después. Pulsa Guardar convocatoria para aplicar los cambios.</small>${riders.map(r=>`<div class="card"><strong>${esc(r.name)}</strong><p>Disponibilidad: <strong>${esc(['Disponible','No disponible'].includes(responses[r.id])?responses[r.id]:'Sin responder')}</strong></p>${select('Convocatoria','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</div>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
       <button type="submit">Guardar convocatoria</button></form></details>
       </section><section class="card" id="eventTravelPanel" hidden></section><section class="card" id="eventExpensePanel" hidden></section>`:''}`;
     document.getElementById('backCalendar').onclick=()=>navigate(page);
@@ -231,10 +235,12 @@ async function calendarPage(c,selectedId){
       const renderCall=()=>{
         const states=selection(),values=Object.values(states);
         c.querySelector('#activityCallStatus').textContent=values.filter(value=>value==='Convocado').length+' convocados · '+values.filter(value=>value==='Preconvocado').length+' preconvocados';
+        c.querySelector('#callSelectionSummary').textContent='Abrir corredores para convocar · '+values.filter(value=>value!=='No convocado').length+' seleccionados';
         publish.textContent=event.callStatus==='Publicada'?'Pasar todos a preconvocados':'Convocar a todos los preconvocados';
         publish.disabled=JSON.stringify(states)!==initial||!values.some(value=>value!=='No convocado');
       };
       renderCall();callForm.onchange=renderCall;
+      callForm.querySelectorAll('[data-bulk-call]').forEach(button=>button.onclick=()=>{setAllCallStates(callForm,button.dataset.bulkCall);renderCall();});
       publish.onclick=async()=>{
         const states=selection(),next=event.callStatus==='Publicada'?'Preconvocado':'Convocado';
         Object.keys(states).forEach(id=>{if(states[id]!=='No convocado')states[id]=next;});
@@ -273,10 +279,12 @@ async function calendarPage(c,selectedId){
       });
     }
     if(availableRole)c.querySelector('[name=status]').onchange=async e=>{
+      const input=e.target;input.disabled=true;
       try{
-        await api('/events/'+event.id+'/availability','POST',{status:e.target.value});
-        await calendarPage(c,event.id);
-      }catch(err){message(err.message);}
+        await api('/events/'+event.id+'/availability','POST',{status:input.value});
+        await calendarPage(c,event.id);message('Disponibilidad guardada. Dirección puede ver tu respuesta.');
+      }catch(err){input.value=['Disponible','No disponible'].includes(event.myStatus)?event.myStatus:'';message(err.message);}
+      finally{input.disabled=false;}
     };
     return;
   }
