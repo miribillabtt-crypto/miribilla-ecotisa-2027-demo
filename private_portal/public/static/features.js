@@ -341,6 +341,9 @@ async function eventTravelPanel(panel,event){
   await refreshHotelGuests(guests,event.id);
 }
 
+function vehicleUsage(booking){
+ return ({particular:'Uso particular',trabajo:'Uso de trabajo'})[booking.usage]||'Uso sin indicar';
+}
 function vehicleAvailability(container,vehicles,events,bookings){
   const section=document.createElement('section');
   section.className='card';
@@ -353,6 +356,7 @@ function vehicleAvailability(container,vehicles,events,bookings){
        ${select('Vehículo','vehicle',[['','Selecciona un vehículo'],...vehicles.map(vehicle=>[vehicle.id,vehicle.name])])}
        <label>Desde<input name="date" type="date" required></label>
        <label>Hasta (opcional)<input name="endDate" type="date"></label>
+       <label>Tipo de uso<select name="usage" required><option value="">Seleccionar</option><option value="particular">Particular</option><option value="trabajo">De trabajo</option></select></label>
        <label>Motivo (opcional)<input name="reason" maxlength="250"></label>
       </div>
       <button type="submit" class="primary">Guardar reserva</button>
@@ -390,7 +394,7 @@ function vehicleAvailability(container,vehicles,events,bookings){
       const labels=[...new Set(matching.map(row=>{
         const team=row.team==='occident'?'Occident':'Netkom';
         const activity=events.find(event=>event.id===row.event);
-        return activity?team+' · '+activity.name:team;
+        return activity?team+' · '+activity.name:row.direct?team+' · '+vehicleUsage(row):team;
       }))];
       const direct=matching.filter(row=>row.direct&&row.id&&me.role==='director').map(row=>
         `<div class="row"><small>${esc(row.reason||'Reserva sin actividad')}</small><button type="button" data-cancel-reservation="${esc(row.id)}">Cancelar reserva</button></div>`
@@ -583,19 +587,32 @@ async function resourceMatrix(c,section){
  }
  const render=()=>{
   const query=search.value.toLocaleLowerCase('es').trim();
-  const filtered=events.filter(event=>(event.name+' '+(event.place||'')).toLocaleLowerCase('es').includes(query)&&
-   (!month.value||activityMonth(event)===month.value||(event.date<month.value+'-01'&&event.endDate>=month.value+'-01')));
+  const matchesMonth=event=>!month.value||activityMonth(event)===month.value||
+   (event.date<month.value+'-01'&&event.endDate>=month.value+'-01');
+  const filtered=events.filter(event=>(event.name+' '+(event.place||'')).toLocaleLowerCase('es').includes(query)&&matchesMonth(event));
+  const direct=vehicleBookings.filter(row=>row.direct&&matchesMonth(row)&&
+   ['Reserva sin actividad',vehicleUsage(row),row.team,row.reason||'',
+    ...resources.vehicles.filter(vehicle=>row.vehicles.includes(vehicle.id)).map(vehicle=>vehicle.name)
+   ].join(' ').toLocaleLowerCase('es').includes(query)).map(row=>({...row,id:row.id||row.team+':'+row.vehicles.join(','),name:'Reserva sin actividad'}));
   host.innerHTML=[['staff','Técnicos'],['vehicles','Vehículos']].filter(([kind])=>section==='all'||kind===section).map(([kind,title])=>{
    const cols=[...resources[kind]].sort((a,b)=>a.name.localeCompare(b.name,'es'));
+   const entries=kind==='vehicles'?sortActivities([...filtered,...direct]):filtered;
    return `<section class="card"><h2>${title}</h2>${cols.length?`<div class="resource-scroll" role="region" aria-label="Disponibilidad de ${title.toLowerCase()}" tabindex="0"><table class="resource-matrix">
     <thead><tr><th scope="col">Fecha · actividad</th>${cols.map(resource=>`<th scope="col">${esc(resource.name)}${resource.function?`<small>${esc(resource.function)}</small>`:''}${resource.plate?`<small>${esc(resource.plate)}</small>`:''}</th>`).join('')}</tr></thead>
-    <tbody>${filtered.map(event=>`<tr><th scope="row"><small>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</small><button type="button" data-resource-event="${esc(event.id)}">${esc(event.name)}</button></th>
+    <tbody>${entries.map(event=>{
+     if(event.direct){
+      const dates=event.date+(event.endDate!==event.date?' – '+event.endDate:'');
+      const team=event.team==='occident'?'Occident':'Netkom';
+      return `<tr><th scope="row"><small>${esc(dates)}</small>Reserva sin actividad<small>${team}${event.reason?' · '+esc(event.reason):''}</small></th>
+      ${cols.map(vehicle=>event.vehicles.includes(vehicle.id)?`<td class="resource-cell assigned">Reservado<small>${vehicleUsage(event)}</small></td>`:'<td>—</td>').join('')}</tr>`;
+     }
+     return `<tr><th scope="row"><small>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</small><button type="button" data-resource-event="${esc(event.id)}">${esc(event.name)}</button></th>
     ${cols.map(resource=>{
      const cell=status(event,resource,kind);
      return `<td class="resource-cell ${cell.style}">${me.role==='director'&&!cell.fixed?`<select data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
        ${(kind==='vehicles'?['Libre','Reservado']:['Disponible','No disponible','Por confirmar']).map(label=>`<option ${cell.label===label?'selected':''}>${label}</option>`).join('')}
       </select>`:`<span>${esc(cell.label)}</span>`}${cell.note?`<small>${esc(cell.note)}</small>`:''}</td>`;
-    }).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+1}">No hay actividades con estos filtros.</td></tr>`}</tbody></table></div>`:'<p>Aún no hay recursos registrados. Añádelos desde sus fichas.</p>'}</section>`;
+    }).join('')}</tr>`;}).join('')||`<tr><td colspan="${cols.length+1}">No hay registros con estos filtros.</td></tr>`}</tbody></table></div>`:'<p>Aún no hay recursos registrados. Añádelos desde sus fichas.</p>'}</section>`;
   }).join('');
   host.querySelectorAll('[data-resource-event]').forEach(button=>button.onclick=()=>{
    page='calendar';

@@ -112,17 +112,18 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
 
     assert change('POST','team',{'team':'occident'}).status_code==200
     vehicle=change('POST','modules/vehicle',{'name':'Furgo'}).json['id']
-    draft={'vehicle':vehicle,'date':'2027-05-01','endDate':'2027-05-02','reason':'Taller'}
+    draft={'vehicle':vehicle,'date':'2027-05-01','endDate':'2027-05-02','reason':'Taller','usage':'trabajo'}
     assert change('POST','vehicle-reservations',dict(draft,endDate='2027-04-30')).status_code==400
+    assert change('POST','vehicle-reservations',dict(draft,usage='')).status_code==400
     created=change('POST','vehicle-reservations',draft)
     assert created.status_code==201
     path='vehicle-reservations/'+created.json['id']
     own=client.get('/api/resource-availability').json['vehicleBookings'][0]
-    assert own['id']==created.json['id'] and own['reason']=='Taller'
+    assert own['id']==created.json['id'] and own['reason']=='Taller' and own['usage']=='trabajo'
     assert change('POST','team',{'team':'netkom'}).status_code==200
     shared=client.get('/api/resource-availability').json['vehicleBookings']
     assert shared==[{'team':'occident','event':None,'date':'2027-05-01','endDate':'2027-05-02',
-                    'vehicles':[vehicle],'direct':True}]
+                    'vehicles':[vehicle],'direct':True,'usage':'trabajo'}]
     assert change('DELETE',path).status_code==404
     assert change('POST','vehicle-reservations',dict(draft,date='2027-05-02')).status_code==409
     assert change('POST','events',{'name':'Carrera','date':'2027-05-02'}).status_code==200

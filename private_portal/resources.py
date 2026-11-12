@@ -40,7 +40,7 @@ def resource_bookings(db, Record, unseal):
         if row.kind == VEHICLE_BOOKING:
             bookings.append(dict(team=row.team, event=None, date=data['date'], endDate=data['endDate'],
                                  vehicles=[data['vehicle']], staff=[], manual=True, reservation=row.id,
-                                 reason=data.get('reason','')))
+                                 reason=data.get('reason',''), usage=data.get('usage','')))
             continue
         event = data.get('event')
         if (row.team, event) not in dates:
@@ -95,7 +95,7 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
                 entry=dict(team=booking['team'], date=booking['date'], endDate=booking['endDate'],
                            vehicles=ids, event=booking['event'] if same_team else None)
                 if 'reservation' in booking:
-                    entry['direct']=True
+                    entry.update(direct=True,usage=booking['usage'])
                     if same_team:
                         entry.update(id=booking['reservation'],reason=booking['reason'])
                 vehicles.append(entry)
@@ -111,6 +111,9 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         start=data.get('date')
         end=data.get('endDate') or start
         reason=data.get('reason','')
+        usage=data.get('usage')
+        if usage not in ('particular','trabajo'):
+            abort(400,'Selecciona uso particular o de trabajo')
         if not isinstance(vehicle,str) or not isinstance(reason,str) or len(reason)>250:
             abort(400,'Revisa el vehículo y el motivo')
         try:
@@ -121,7 +124,7 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         lock_vehicle_bookings(g.db)
         resource=g.db.get(Record,vehicle,with_for_update=True)
         if not resource or resource.kind!='module:vehicle':abort(404,'Vehículo no disponible')
-        reservation=dict(vehicle=vehicle,date=start,endDate=end,reason=reason.strip())
+        reservation=dict(vehicle=vehicle,date=start,endDate=end,reason=reason.strip(),usage=usage)
         check_manual_vehicle_booking(resource_bookings(g.db,Record,unseal),g.team,None,reservation,vehicle)
         row=Record(kind=VEHICLE_BOOKING,owner_id=g.user.id,data=seal(reservation))
         g.db.add(row)
