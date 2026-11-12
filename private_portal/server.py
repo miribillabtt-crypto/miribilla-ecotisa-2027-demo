@@ -180,10 +180,12 @@ def create_app(test_config=None):
     @app.get('/health')
     def health():
         g.db.execute(select(1))
+        calendar_receipt=app.config.get('NETKOM_CALENDAR_RECEIPT')
+        health_details={'netkomCalendar2027':calendar_receipt} if calendar_receipt else {}
         rider_receipt=app.config.get('RIDER_ACCOUNT_RECEIPT')
-        if rider_receipt:return jsonify(status='ok',riderAccountsVerified=rider_receipt['verified'],existingAccounts=rider_receipt['existingAccounts'])
+        if rider_receipt:return jsonify(status='ok',riderAccountsVerified=rider_receipt['verified'],existingAccounts=rider_receipt['existingAccounts'],**health_details)
         receipt=app.config.get('ROSTER_IMPORT_RECEIPT')
-        return jsonify(status='ok',rosterImported=receipt['total']) if receipt else jsonify(status='ok')
+        return jsonify(status='ok',rosterImported=receipt['total'],**health_details) if receipt else jsonify(status='ok',**health_details)
     @app.get('/')
     def index():return render_template('index.html')
     @app.get('/organizacion')
@@ -746,7 +748,7 @@ def create_app(test_config=None):
         app.config['ROSTER_IMPORT_RECEIPT']=import_roster(Sessions,Record,User,cipher,roster_payload)
     if not app.testing:
         from calendar_seed import seed_calendar
-        seed_calendar(Sessions,Record,cipher)
+        app.config['NETKOM_CALENDAR_RECEIPT']=seed_calendar(Sessions,Record,cipher)
     from settlements import register_settlements
     register_settlements(app,Record,User,CLOTHES,seal,unseal,audit,require,body)
     from account_summary import register_account_summary

@@ -46,8 +46,9 @@ def import_netkom_calendar(Sessions, Record, cipher, payload):
     with Sessions.begin() as db:
         if db.get_bind().dialect.name == 'postgresql':
             db.execute(text('SELECT pg_advisory_xact_lock(20272027)'))
-        if db.get(Record, marker):
-            return None
+        imported = db.get(Record, marker)
+        if imported:
+            return json.loads(cipher.decrypt(imported.data))
 
         rows = json.loads(payload)
         keys = set()
@@ -120,6 +121,4 @@ def seed_calendar(Sessions, Record, cipher):
     restore_calendar(Sessions, Record, cipher)
     payload = os.environ.get('NETKOM_CALENDAR_2027')
     if payload:
-        receipt = import_netkom_calendar(Sessions, Record, cipher, payload)
-        if receipt:
-            print(f"NETKOM_CALENDAR_2027 imported: {receipt['created']} created, {receipt['updated']} updated", flush=True)
+        return import_netkom_calendar(Sessions, Record, cipher, payload)
