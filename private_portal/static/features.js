@@ -720,6 +720,8 @@ async function vehicleLogsPage(c){
  }
  const km=value=>new Intl.NumberFormat('es-ES').format(value)+' km';
  const time=value=>new Date(value).toLocaleString('es-ES',{timeZone:'Europe/Madrid'});
+ const deleteButton=log=>me.role==='director'||log.user===me.id
+  ? `<button type="button" data-delete-vehicle-log="${esc(log.id)}">Borrar registro</button>` : '';
  const options=[['','Selecciona un vehículo'],...vehicles.filter(v=>!open.some(log=>log.vehicle===v.id)).map(v=>[v.id,v.name])];
  c.innerHTML=`<h1>Gestión de vehículos</h1>
  <form id="vehicleDeparture" class="card"><h2>Registrar salida</h2><div class="grid">
@@ -732,13 +734,28 @@ async function vehicleLogsPage(c){
  ${me.role==='director'||log.user===me.id?`<form id="return-${esc(log.id)}">
  <div class="grid"><label>Km de regreso<input type="number" name="end" min="${log.start}" max="9999999" step="1" inputmode="numeric" required></label>
  <label>Observaciones<input name="notes" maxlength="1000" placeholder="Combustible, incidencias…"></label></div>
- <button type="submit" class="primary">Registrar regreso</button></form>`:''}</div>`).join('')||'<p>No hay salidas abiertas.</p>'}
+ <button type="submit" class="primary">Registrar regreso</button></form>`:''}${deleteButton(log)}</div>`).join('')||'<p>No hay salidas abiertas.</p>'}
  <h2>Historial</h2>${completed.length?`<p>${[...totals.values()].map(item=>`${esc(item.name)} · ${km(item.km)}`).join(' · ')}</p>
- <div class="card scroll"><table><thead><tr><th>Vehículo</th><th>Conductor</th><th>Salida</th><th>Regreso</th><th>Km recorridos</th><th>Motivo y observaciones</th></tr></thead>
+ <div class="card scroll"><table><thead><tr><th>Vehículo</th><th>Conductor</th><th>Salida</th><th>Regreso</th><th>Km recorridos</th><th>Motivo y observaciones</th><th>Acciones</th></tr></thead>
  <tbody>${completed.map(log=>`<tr><td>${esc(log.name)}</td><td>${esc(log.driver)}</td>
  <td>${esc(time(log.started))}<br>${km(log.start)}</td><td>${esc(time(log.finished))}<br>${km(log.end)}</td><td>${km(log.end-log.start)}</td>
- <td>${esc([log.purpose,log.notes].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody></table></div>`:'<p>No hay trayectos cerrados.</p>'}`;
+ <td>${esc([log.purpose,log.notes].filter(Boolean).join(' · '))}</td><td>${deleteButton(log)}</td></tr>`).join('')}</tbody></table></div>`:'<p>No hay trayectos cerrados.</p>'}`;
  c.querySelector('#vehicleDeparture select').required=true;
+ for(const button of c.querySelectorAll('[data-delete-vehicle-log]')){
+  button.onclick=async()=>{
+   if(!confirm('¿Borrar este registro de kilómetros?'))return;
+   button.disabled=true;
+   try{
+    await api('/vehicle-logs/'+encodeURIComponent(button.dataset.deleteVehicleLog),'DELETE');
+    await vehicleLogsPage(c);
+    message('Registro borrado.');
+   }catch(error){
+    message(error.message);
+    button.disabled=false;
+   }
+  };
+ }
+
  bindForm('vehicleDeparture',async(_,data)=>{
   await api('/vehicle-logs','POST',{vehicle:data.vehicle,start:Number(data.start),purpose:data.purpose});
   await vehicleLogsPage(c);message('Salida registrada.');

@@ -105,3 +105,15 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         row.data = seal(log)
         audit('vehicle_return', row.id)
         return jsonify(ok=True)
+
+    @app.delete('/api/vehicle-logs/<log_id>')
+    @require('director','technician')
+    def delete_vehicle_log(log_id):
+        row = g.db.get(Record, log_id, with_for_update=True)
+        if not row or row.kind != 'system:vehicle-log':
+            abort(404)
+        if g.user.role != 'director' and row.owner_id != g.user.id:
+            abort(403)
+        g.db.delete(row)
+        audit('vehicle_log_deleted', log_id)
+        return jsonify(ok=True)
