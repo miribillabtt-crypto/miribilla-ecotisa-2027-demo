@@ -138,7 +138,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   return start,max(start,event.get('endDate') or start)
 
  def check_vehicle_reservations(data,event,skip=None):
-  from resources import availability_key, other_team_resource_bookings
+  from resources import availability_key, resource_bookings
   for resource_id in data.get('staff',[])+data.get('vehicles',[]):
    status=g.db.get(Record,availability_key(data['event'],resource_id))
    if status and unseal(status.data)['status']=='No disponible':
@@ -155,9 +155,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if not shared_ids:return
   start,end=travel_range(event)
   if start:
-   for booking in other_team_resource_bookings(g.db,Record,unseal,g.team):
-    if shared_ids.intersection(booking['resources']) and start<=booking['endDate'] and booking['date']<=end:
-     abort(409,'Un vehículo o técnico ya está asignado al otro equipo en esas fechas')
+   vehicle_ids=set(data.get('vehicles',[]))
+   staff_ids=set(data.get('staff',[]))
+   for booking in resource_bookings(g.db,Record,unseal):
+    same_team=booking['team']==g.team
+    if same_team and (booking['event']==data['event'] or not booking['manual']):continue
+    occupied=vehicle_ids.intersection(booking['vehicles']) or staff_ids.intersection(booking['staff'])
+    if occupied and start<=booking['endDate'] and booking['date']<=end:
+     abort(409,'Un vehículo o técnico ya está reservado en esas fechas')
   if not data.get('vehicles'):return
   start,end=travel_range(event)
   if not start:abort(400,'Indica la fecha de inicio de la actividad antes de reservar vehículos')
@@ -373,6 +378,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if r.kind=='archived:fine':
    r.kind='fine';audit('fine_restored',r.id);return jsonify(ok=True)
   if r.kind=='archived:event':
+   from resources import check_manual_vehicle_dates
+   check_manual_vehicle_dates(g.db,Record,unseal,g.team,r.id,unseal(r.data))
    for travel in rows('travel'):
     data=unseal(travel.data)
     if data.get('event')==r.id:check_vehicle_reservations(data,unseal(r.data),travel.id)
@@ -455,6 +462,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
     rider=g.db.get(User,rid)
     if not rider or not rider.active or rider.role!='runner':abort(400,'Revisa los corredores seleccionados')
   if travel_range(out)!=previous_dates:
+   from resources import check_manual_vehicle_dates
+   check_manual_vehicle_dates(g.db,Record,unseal,g.team,event_id,out)
    for travel in rows('travel'):
     data=unseal(travel.data)
     if data['event']==event_id:check_vehicle_reservations(data,out,travel.id)

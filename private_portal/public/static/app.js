@@ -13,7 +13,7 @@ async function activation(token){activationToken=token;const data=await api('/ac
 
 function directionSections(){
  return [
-  ['Inicio',[['home','Inicio'],...(me.canSwitchTeam?[[me.team==='occident'?'switchNetkom':'switchOccident',me.team==='occident'?'Cambiar a Netkom':'Cambiar a Occident']]:[])]],
+  ['Inicio',[['home','Inicio']]],
   ['Organización',[['organization','Organización'],['spaces','Reservas de espacios']]],
   ['Calendario',[['calendar','Calendario']]],
   ['Equipo',[['roster','Corredores'],['licenses','Licencias'],['equipment','Material y medidas'],['clothes','Pedido de ropa'],['shop','Tienda'],['results','Resultados'],['days','Días de actividad'],['fines','Multas']]],
@@ -36,7 +36,7 @@ function directionSubnav(sections){
  return `<div class="section-navigation"><strong>${title}</strong><div class="section-links" aria-label="Apartados de ${title}">${items.map(([id,label])=>`<button type="button" data-page="${id}" ${page===id?'aria-current="page" class="active"':''}>${label}</button>`).join('')}</div></div>`;
 }
 function shell(){const mobile=window.matchMedia?.('(max-width: 800px)').matches;const sections=me.role==='director'?directionSections():null;let groups=[];if(me.role==='runner')groups=[['Mi área',[['home','Inicio'],['calendar','Calendario del equipo'],['calls','Mis convocatorias'],['planning','Mi planning'],['profile','Mis datos y documentos'],['results','Mis resultados'],['days','Mis días de actividad'],['charges','Mis gastos y recibos'],['myclothes','Mi ropa'],['shop','Tienda'],['fines','Mis multas'],['publications','Mis publicaciones']]]];else if(me.role==='technician')groups=[['Área técnica',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi disponibilidad'],['calls','Convocatorias'],['planning','Planning y medios'],['resources','Técnicos y vehículos'],['vehiclelogs','Gestión de vehículos'],['spaces','Reservas de espacios'],['equipment','Material y medidas'],['results','Resultados'],['days','Días de actividad']]]];else groups=[['Comunicación',[['home','Inicio'],['publications','Generar publicaciones'],['photos','Fotos autorizadas'],['whatsapp','Avisos por WhatsApp']]]];app.innerHTML=`<div class="portal-layout"><aside><div class="identity"><strong>${esc(me.name)}</strong><small>${esc(roles[me.role])}</small></div><button type="button" id="mobileMenu" aria-expanded="false" aria-controls="portalNavigation">☰ Menú</button><div id="portalNavigation"><nav aria-label="Menú del portal">${sections?directionNavigation(sections):groups.map(([title,items])=>`<details ${!mobile||items.some(([id])=>id===page)?'open':''}><summary>${title}</summary>${items.map(([id,label])=>`<button data-page="${id}" ${page===id?'aria-current="page"':''} class="${page===id?'active':''}">${label}</button>`).join('')}</details>`).join('')}</nav><button id="logout">Cerrar sesión</button></div></aside>
-${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${['director','technician'].includes(me.role)?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
+${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${['director','technician'].includes(me.role)?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';resourceSection='';vehicleBookingDay='';updateTeamHeader();login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
 menu.onclick=()=>{
  const expanded=menu.getAttribute('aria-expanded')==='true';
  menu.setAttribute('aria-expanded',String(!expanded));
@@ -96,11 +96,7 @@ window.addEventListener('message',event=>{
  }
 });
 async function navigate(next){
- if(next==='switchOccident'||next==='switchNetkom'){
-  try{await api('/team','POST',{team:next==='switchOccident'?'occident':'netkom'});await init();}
-  catch(error){message(error.message);}
-  return;
- }
+
  page=(me.role==='director'&&['calls','planning'].includes(next))||(me.role==='runner'&&next==='mine')?'calendar':next;message('');const content=shell();if(window.matchMedia?.('(max-width: 800px)').matches)window.scrollTo(0,0);try{if(page==='home'){await dashboardPage(content);}else if(page==='organization')organizationPage(content);else if(featureViews[page]){await featureViews[page](content);}else if(page==='users'){await usersPage(content);addBulkUserImport(content);}else if(page==='calendar'||page==='mine')await calendarPage(content);else if(page==='profile')await profilePage(content,me.id);else if(page==='roster')await rosterPage(content);else if(page==='clothes')await clothesPage(content);else if(page==='myclothes')await myClothesPage(content);else if(page==='fines')await finesPage(content);else if(page==='photos')await photosPage(content);else if(page==='audit'){const d=await api('/audit');content.innerHTML='<h1>Registro de accesos y cambios</h1><div class="card scroll"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Referencia</th></tr></thead><tbody>'+d.entries.map(r=>`<tr><td>${esc(new Date(r.at*1000).toLocaleString('es-ES'))}</td><td>${esc(r.action)}</td><td>${esc(r.user||'Acceso no identificado')}</td><td>${esc(r.target)}</td></tr>`).join('')+'</tbody></table></div>';}}catch(e){message(e.message);}}
 function inviteLink(token){return location.origin+'/#activar='+encodeURIComponent(token);}
 async function usersPage(c){const d=await api('/users');users=d.users;c.innerHTML=`<h1>Usuarios del equipo</h1>${me.owner?`<details class="card"><summary>Invitar por correo</summary><p>Para crear una ficha de corredor o técnico, usa Equipo o Técnicos y vehículos.</p><form method="post" id="invite"><div class="grid">${field('Nombre y apellidos','name')}${field('Correo de acceso','email','email')}${select('Perfil','role',Object.entries(roles))}</div><label>Permitir consulta de DNI, SEPA y documentos privados (solo Dirección)<input type="checkbox" name="documents"></label><button type="submit" class="primary">Crear invitación</button><div id="inviteResult" aria-live="polite"></div></form></details>`:''}<div class="card scroll"><table><thead><tr><th>Nombre</th><th>Correo</th><th>Perfil</th><th>Acceso</th><th></th></tr></thead><tbody>${users.map(u=>`<tr><td>${esc(u.name)}</td><td>${esc(u.email||'—')}</td><td>${esc(roles[u.role])}${u.documents?' · Documentos':''}</td><td>${u.active?(u.accountReady?'Activo':'Sin acceso'):'Desactivado'}${me.owner&&!u.active?` <button data-restore-user="${u.id}">Restaurar acceso</button>`:''}</td><td>${me.owner&&u.active?`${u.accountReady?`<button data-reset="${u.id}">Restablecer acceso</button> `:''}${!u.owner?`<button data-disable="${u.id}">Desactivar</button>`:''}`:''}</td></tr>`).join('')}</tbody></table></div>`;c.querySelectorAll('[data-restore-user]').forEach(b=>b.onclick=async()=>{try{await api('/users/'+b.dataset.restoreUser+'/restore','POST',{});await navigate('users');}catch(e){message(e.message);}});bindForm('invite',async(f,data)=>{data.documents=f.elements.documents.checked;const result=await api('/invites','POST',data);document.getElementById('inviteResult').innerHTML=`<div class="note"><strong>Invitación creada · caduca en 48 horas</strong><p>Entrega este enlace únicamente a la persona indicada:</p><p class="secret">${esc(inviteLink(result.token))}</p><small>No se ha enviado ningún correo.</small></div>`;});c.querySelectorAll('[data-disable]').forEach(b=>b.onclick=async()=>{if(confirm('¿Desactivar este usuario y cerrar sus sesiones?')){try{await api('/users/'+b.dataset.disable+'/disable','POST',{});await navigate('users');}catch(e){message(e.message);}}});c.querySelectorAll('[data-reset]').forEach(b=>b.onclick=async()=>{if(!confirm('Se cerrarán sus sesiones y se generará un nuevo enlace de activación. ¿Continuar?'))return;try{const r=await api('/users/'+b.dataset.reset+'/reset','POST',{});message('Enlace de recuperación (1 hora): '+inviteLink(r.token));}catch(e){message(e.message);}});}
@@ -706,12 +702,36 @@ async function finesPage(c){
  });
 }
 async function photosPage(c){const d=await api('/media/roster');c.innerHTML='<h1>Fotos autorizadas</h1><div class="note">Medio cuerpo y en bicicleta. Solo se muestran corredores con autorización de imagen registrada.</div>';for(const r of d.riders){const node=document.createElement('div');node.className='card';node.innerHTML='<h2>'+esc(r.name)+'</h2>'+(r.photos.map(f=>`<p>${esc(f.kind==='portrait'?'Medio cuerpo':'En bicicleta')} · <a href="/api/file/${f.id}">Descargar foto</a></p>`).join('')||'<p>Sin fotos registradas.</p>')+(['director','communication'].includes(me.role)?`<form method="post" data-photo-upload="${r.id}">${select('Tipo de foto','kind',[['portrait','Medio cuerpo'],['action','En bicicleta']])}<label>Foto JPG/PNG · máximo 3 MB<input type="file" name="file" accept="image/jpeg,image/png" required></label><button type="submit">Guardar foto</button></form>`:'');c.appendChild(node);}if(!d.riders.length)c.insertAdjacentHTML('beforeend','<div class="card">Sin corredores con autorización registrada todavía.</div>');c.querySelectorAll('[data-photo-upload]').forEach(f=>f.onsubmit=async e=>{e.preventDefault();try{await api('/documents/'+f.dataset.photoUpload,'POST',new FormData(f),f);await photosPage(c);message('Foto guardada en la ficha del corredor.');}catch(err){message(err.message);}});}
-async function init(){try{if(window.DemoPortal?.active&&!DemoPortal.role){DemoPortal.selector();return;}const fragment=new URLSearchParams(location.hash.slice(1));const token=fragment.get('activar');const data=await api('/me');me=data.user;csrf=data.csrf||'';
- if(me){me.team=data.team||'netkom';me.canSwitchTeam=Boolean(data.canSwitchTeam);}
- const occident=me?.team==='occident';
+function updateTeamHeader(){
  const brand=document.querySelector('.brand-lockup');
+ const occident=me?.team==='occident';
  brand.classList.toggle('occident-brand',occident);
  brand.querySelector('strong').textContent=occident?'OCCIDENT MIRIBILLA CYCLING':'MIRIBILLA × ECOTISA';
- document.title=occident?'Occident · Miribilla Cycling · Área privada':'Netkom · Miribilla × Ecotisa · Área privada';if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}page='home';await navigate(page);}catch(e){login();message(e.message);}}
+ document.title=occident?'Occident · Miribilla Cycling · Área privada':'Netkom · Miribilla × Ecotisa · Área privada';
+ brand.querySelector('.team-switcher')?.remove();
+ if(!me?.canSwitchTeam)return;
+ const controls=document.createElement('div');
+ controls.className='team-switcher';
+ controls.setAttribute('role','group');
+ controls.setAttribute('aria-label','Cambiar de equipo');
+ controls.innerHTML=[['netkom','Netkom'],['occident','Occident']].map(([team,label])=>
+  `<button type="button" data-team="${team}" aria-pressed="${team===me.team}">${label}</button>`).join('');
+ brand.append(controls);
+ const buttons=[...controls.querySelectorAll('button')];
+ for(const button of buttons)button.onclick=async()=>{
+  if(button.dataset.team===me.team)return;
+  buttons.forEach(item=>item.disabled=true);
+  try{
+   const previousPage=page;
+   await api('/team','POST',{team:button.dataset.team});
+   await init(previousPage);
+  }catch(error){message(error.message);}
+  finally{buttons.forEach(item=>item.disabled=false);}
+ };
+}
+async function init(initialPage='home'){try{if(window.DemoPortal?.active&&!DemoPortal.role){DemoPortal.selector();return;}const fragment=new URLSearchParams(location.hash.slice(1));const token=fragment.get('activar');const data=await api('/me');me=data.user;csrf=data.csrf||'';
+ if(me){me.team=data.team||'netkom';me.canSwitchTeam=Boolean(data.canSwitchTeam);}
+ updateTeamHeader();
+ if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}await navigate(initialPage);}catch(e){me=null;updateTeamHeader();login();message(e.message);}}
 window.PortalEnhancements?.start(()=>me?.role==='director');
 init();

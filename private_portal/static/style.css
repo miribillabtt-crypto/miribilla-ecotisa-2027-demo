@@ -93,3 +93,9 @@
 header:has(.occident-brand){background:#ac3d0d}
 .occident-brand .brand-logo{display:none}
 .occident-brand>div{border-left:0;padding-left:0}
+
+.brand-lockup>.team-switcher{display:flex;gap:6px;margin-left:auto;padding-left:0;border-left:0}
+.team-switcher button{min-height:42px;margin:0;padding:8px 14px;background:transparent;border:1px solid #ffffff9c;color:#fff;font-weight:600;white-space:nowrap}
+.team-switcher button[aria-pressed=true]{background:#fff;border-color:#fff;color:#17388d}
+.team-switcher button:hover:not([aria-pressed=true]){background:#ffffff25}
+@media(max-width:600px){.brand-lockup{flex-wrap:wrap}.brand-lockup>.team-switcher{margin-left:0}}

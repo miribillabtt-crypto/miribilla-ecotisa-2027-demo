@@ -341,29 +341,42 @@ async function eventTravelPanel(panel,event){
   await refreshHotelGuests(guests,event.id);
 }
 
-async function vehicleAvailability(container,vehicles,events){
-  const {records}=await api('/modules/travel');
+async function vehicleAvailability(container,vehicles,events,bookings){
+  bookings=bookings??(await api('/resource-availability')).vehicleBookings;
   const section=document.createElement('section');
   section.className='card';
-  section.innerHTML=`<details><summary>Calendario de reservas de vehículos</summary>
-    <label>Consultar día<input type="date" id="vehicleDay" value="${calendarDateKey(new Date())}"></label>
-    <div id="vehicleBookings"></div></details>`;
+  section.innerHTML=`<details open><summary>Reservas de vehículos · Netkom y Occident</summary>
+    <label>Consultar día<input type="date" id="vehicleDay" value="${esc(vehicleBookingDay||calendarDateKey(new Date()))}"></label>
+    <div id="vehicleBookings"></div><div id="vehicleBookingDates"></div></details>`;
   container.prepend(section);
   const day=section.querySelector('#vehicleDay');
+  const activeIds=new Set(vehicles.map(vehicle=>vehicle.id));
+  const future=bookings.filter(row=>row.endDate>=calendarDateKey(new Date())&&row.vehicles.some(id=>activeIds.has(id)));
+  const upcoming=[...new Set(future.map(row=>row.date))].sort();
+  section.querySelector('#vehicleBookingDates').innerHTML=upcoming.length?`<label>Ir a una fecha con reservas
+    <select><option value="">Seleccionar fecha</option>${upcoming.map(date=>`<option>${esc(date)}</option>`).join('')}</select></label>`:'';
+  const dates=section.querySelector('#vehicleBookingDates select');
+  if(dates)dates.onchange=()=>{if(dates.value){day.value=dates.value;redraw();}};
   const redraw=()=>{
+    vehicleBookingDay=day.value;
     const output=section.querySelector('#vehicleBookings');
     if(!day.value){output.textContent='Selecciona un día.';return;}
     output.innerHTML=vehicles.map(vehicle=>{
-      const assigned=records.filter(row=>row.vehicles?.includes(vehicle.id))
-        .map(row=>events.find(event=>event.id===row.event)).filter(Boolean);
-      const booked=assigned.filter(event=>event.date&&event.date<=day.value&&(event.date===day.value||event.endDate>=day.value));
-      const undated=assigned.filter(event=>!event.date);
-      return `<div class="row"><strong>${esc(vehicle.name)}</strong><span>${booked.length?'Reservado · '+booked.map(event=>esc(event.name)).join(', '):'Libre'}${undated.length?' · '+undated.length+' sin fecha confirmada':''}</span></div>`;
+      const matching=bookings.filter(row=>row.vehicles.includes(vehicle.id)&&row.date<=day.value&&row.endDate>=day.value);
+      const labels=[...new Set(matching.map(row=>{
+        const team=row.team==='occident'?'Occident':'Netkom';
+        const activity=events.find(event=>event.id===row.event);
+        return activity?team+' · '+activity.name:team;
+      }))];
+      return `<div class="row"><strong>${esc(vehicle.name)}</strong><span class="resource-state ${labels.length?'assigned':'available'}">${labels.length?'Reservado · '+labels.map(esc).join(', '):'Libre'}</span></div>`;
     }).join('')||'<p>No hay vehículos registrados.</p>';
   };
   day.onchange=redraw;
   redraw();
 }
+let vehicleBookingDay='';
+let resourceSection='';
+
 function clothingCatalog(){
  return `<details class="card clothing-catalog"><summary>Ver diseños de la ropa · Júnior 2027</summary>
   <p>Consulta cómo quedan las prendas antes de elegir tu talla o pedir ropa adicional.</p>
@@ -450,12 +463,13 @@ async function resourcesPage(c){
   availability?.classList.toggle('active',kind==='all');
   c.querySelector('#stafftab').classList.toggle('active',kind==='staff');
   c.querySelector('#vehicletab').classList.toggle('active',kind==='vehicles');
+  resourceSection=kind;
   await resourceMatrix(content,kind);
  };
  if(availability)availability.onclick=()=>show('all').catch(err=>message(err.message));
  c.querySelector('#stafftab').onclick=()=>show('staff').catch(err=>message(err.message));
  c.querySelector('#vehicletab').onclick=()=>show('vehicles').catch(err=>message(err.message));
- await show(director?'staff':'all');
+ await show(resourceSection||(director?'staff':'all'));
 }
 
 async function resourceMatrix(c,section){
@@ -464,6 +478,7 @@ async function resourceMatrix(c,section){
  ]);
  const events=sortActivities(calendar.events);
  const statusRows=overrides.records||[];
+ const vehicleBookings=overrides.vehicleBookings||[];
  const resources={staff:staff.records,vehicles:vehicles.records};
  const assignments=new Map(travel.records.map(trip=>[trip.event,trip]));
  const range=event=>[event.date,event.endDate&&event.endDate>event.date?event.endDate:event.date];
@@ -472,18 +487,25 @@ async function resourceMatrix(c,section){
   return a&&x&&a<=y&&x<=b;
  };
  function status(event,resource,kind){
+  if(kind==='vehicles'){
+   const reserved=vehicleBookings.filter(row=>row.vehicles.includes(resource.id)&&overlap(event,row));
+   const other=reserved.find(row=>row.team!==me.team||row.event!==event.id);
+   if(other)return {label:'Reservado',style:'assigned',fixed:true,note:other.team!==me.team?(other.team==='occident'?'Occident':'Netkom'):events.find(item=>item.id===other.event)?.name};
+   const assigned=(assignments.get(event.id)?.vehicles||[]).includes(resource.id);
+   const manual=statusRows.some(row=>row.event===event.id&&row.resource===resource.id&&['Reservado','No disponible'].includes(row.status));
+   return assigned||manual?{label:'Reservado',style:'assigned',fixed:assigned}:{label:'Libre',style:'available',fixed:!event.date};
+  }
   if((assignments.get(event.id)?.[kind]||[]).includes(resource.id)){
-   return {label:kind==='staff'?'Convocado':'Reservado',style:'assigned',fixed:true};
+   return {label:'Convocado',style:'assigned',fixed:true};
   }
   const other=events.find(candidate=>candidate.id!==event.id&&overlap(event,candidate)&&
    (assignments.get(candidate.id)?.[kind]||[]).includes(resource.id));
-  if(other)return {label:kind==='vehicles'?'Reservado':'No disponible',style:'unavailable',fixed:true,note:other.name};
+  if(other)return {label:'No disponible',style:'unavailable',fixed:true,note:other.name};
   if((overrides.shared||[]).some(booking=>booking.resources.includes(resource.id)&&overlap(event,booking))){
-   return {label:'Reservado',style:'unavailable',fixed:true,note:me.team==='occident'?'Netkom':'Occident'};
+   return {label:'No disponible',style:'unavailable',fixed:true,note:me.team==='occident'?'Netkom':'Occident'};
   }
   const manual=statusRows.find(row=>row.event===event.id&&row.resource===resource.id);
-  const answer=manual?.status||(kind==='staff'?event.responses?.[resource.user]:null);
-  const label=answer||(kind==='vehicles'?(event.date?'Disponible':'Por confirmar'):'Por confirmar');
+  const label=manual?.status||event.responses?.[resource.user]||'Por confirmar';
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
  c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
@@ -499,8 +521,9 @@ async function resourceMatrix(c,section){
   </details>`:''}
   <div class="toolbar"><label>Buscar actividad<input type="search" id="resourceSearch" placeholder="Carrera, lugar…"></label>
    <label>Mes<input type="month" id="resourceMonth"></label><button type="button" id="resourceClear">Ver todo</button></div>
-  <div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado / Reservado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>
-  <p>Abre una actividad pulsando su nombre. Las asignaciones se cargan de la ficha del viaje.${me.role==='director'?' Puedes indicar la disponibilidad en las celdas que aún no están asignadas.':''}</p>
+  ${section!=='staff'?'<div class="toolbar resource-legend"><span class="resource-state available">Libre</span><span class="resource-state assigned">Reservado</span></div>':''}
+  ${section!=='vehicles'?'<div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>':''}
+  <p>Abre una actividad pulsando su nombre.${section!=='staff'?' Las reservas del viaje se modifican en su ficha.':''}</p>
   <div id="resourceTables"></div>`;
  const host=c.querySelector('#resourceTables');
  const search=c.querySelector('#resourceSearch'),month=c.querySelector('#resourceMonth');
@@ -554,7 +577,7 @@ async function resourceMatrix(c,section){
     ${cols.map(resource=>{
      const cell=status(event,resource,kind);
      return `<td class="resource-cell ${cell.style}">${me.role==='director'&&!cell.fixed?`<select data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
-       ${[['Disponible','Disponible'],['No disponible','No disponible'],['Por confirmar','Por confirmar']].map(([value,label])=>`<option value="${value}" ${cell.label===label||cell.label===value?'selected':''}>${label}</option>`).join('')}
+       ${(kind==='vehicles'?['Libre','Reservado']:['Disponible','No disponible','Por confirmar']).map(label=>`<option ${cell.label===label?'selected':''}>${label}</option>`).join('')}
       </select>`:`<span>${esc(cell.label)}</span>`}${cell.note?`<small>${esc(cell.note)}</small>`:''}</td>`;
     }).join('')}</tr>`).join('')||`<tr><td colspan="${cols.length+1}">No hay actividades con estos filtros.</td></tr>`}</tbody></table></div>`:'<p>Aún no hay recursos registrados. Añádelos desde sus fichas.</p>'}</section>`;
   }).join('');
@@ -568,6 +591,11 @@ async function resourceMatrix(c,section){
    try{
     const update={event:select.dataset.resourceActivity,resource:select.dataset.resource,status:select.value};
     await api('/resource-availability','POST',update);
+    if(['Libre','Reservado'].includes(update.status)){
+     await resourceMatrix(c,section);
+     message('Reserva actualizada.');
+     return;
+    }
     const previous=statusRows.find(row=>row.event===update.event&&row.resource===update.resource);
     if(previous)Object.assign(previous,update);else statusRows.push(update);
     render();message('Disponibilidad guardada.');
@@ -579,6 +607,7 @@ async function resourceMatrix(c,section){
  search.oninput=render;month.onchange=render;
  c.querySelector('#resourceClear').onclick=()=>{search.value='';month.value='';render();};
  render();
+ if(section!=='staff')await vehicleAvailability(c,resources.vehicles,events,vehicleBookings);
 }
 async function callsPage(c){
  const [events,riders]=await Promise.all([api('/events'),api('/roster')]);

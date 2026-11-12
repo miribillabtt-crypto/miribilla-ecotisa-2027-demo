@@ -57,3 +57,42 @@ def test_occident_isolated_and_shared(env):
     assert alex.get('/api/users').json['users'][0]['name']=='Alex Toledo'
     assert alex.post('/api/team',json={'team':'netkom'},headers={'X-CSRF-Token':info['csrf']}).status_code==403
     assert director.get('/api/events').json['events'][0]['name']=='Carrera privada de Netkom'
+
+def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):
+    app,_,_,_=env
+    with app.extensions['db_sessions'].begin() as db:
+        db.add(User(id='shared-direction',email='direccion',name='Dirección',role='director',
+                    documents=True,password=generate_password_hash('a-password-for-testing'),
+                    profile=app.extensions['cipher'].encrypt(b'{}')))
+    client=app.test_client()
+    assert client.post('/api/login',json={'email':'direccion','password':'a-password-for-testing'}).status_code==200
+
+    def post(path,data):
+        return client.post('/api/'+path,json=data,headers={'X-CSRF-Token':client.get('/api/me').json['csrf']})
+
+    def activity(name, date, end=''):
+        assert post('events',{'name':name,'date':date,'endDate':end}).status_code==200
+        return next(e['id'] for e in client.get('/api/events').json['events'] if e['name']==name)
+
+    vehicle=post('modules/vehicle',{'name':'Furgo'}).json['id']
+    assert post('team',{'team':'occident'}).status_code==200
+    occident=activity('Privada Occident','2027-03-01','2027-03-03')
+    reserve={'event':occident,'resource':vehicle,'status':'Reservado'}
+    assert post('resource-availability',reserve).status_code==200
+
+    assert post('team',{'team':'netkom'}).status_code==200
+    assert client.get('/api/events').json['events']==[]
+    shared=client.get('/api/resource-availability').json['vehicleBookings']
+    assert shared==[{'team':'occident','event':None,'date':'2027-03-01','endDate':'2027-03-03','vehicles':[vehicle]}]
+    netkom=activity('Privada Netkom','2027-03-03')
+    assert post('resource-availability',dict(reserve,event=netkom)).status_code==409
+    assert post('modules/travel',{'event':netkom,'vehicles':[vehicle]}).status_code==409
+
+    assert post('team',{'team':'occident'}).status_code==200
+    assert post('resource-availability',dict(reserve,status='Libre')).status_code==200
+    assert post('team',{'team':'netkom'}).status_code==200
+    assert client.get('/api/resource-availability').json['vehicleBookings']==[]
+    assert post('modules/travel',{'event':netkom,'vehicles':[vehicle]}).status_code==200
+    assert post('team',{'team':'occident'}).status_code==200
+    assert client.get('/api/resource-availability').json['vehicleBookings']==[
+        {'team':'netkom','event':None,'date':'2027-03-03','endDate':'2027-03-03','vehicles':[vehicle]}]

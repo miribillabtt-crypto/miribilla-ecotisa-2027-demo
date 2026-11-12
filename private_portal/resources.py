@@ -8,12 +8,14 @@ def availability_key(event, resource):
     return 'resource-status:'+hashlib.sha256((event+':'+resource).encode()).hexdigest()
 
 
-def other_team_resource_bookings(db, Record, unseal, team):
-    # Project only encrypted rows here. Never load another team's ORM records
-    # into the identity map used by the rest of the request.
+VEHICLE_RESERVED = ('Reservado', 'No disponible')
+
+
+def resource_bookings(db, Record, unseal):
+    # Read only projected rows so other-team records never enter the identity map.
     rows = db.execute(
-        select(Record.kind, Record.id, Record.data)
-        .where(Record.team != team, Record.kind.in_(('event', 'module:travel')))
+        select(Record.kind, Record.id, Record.team, Record.data)
+        .where(Record.kind.in_(('event', 'module:travel', 'system:resource-availability')))
         .execution_options(shared_resource_lookup=True)
     ).all()
     dates = {}
@@ -22,16 +24,47 @@ def other_team_resource_bookings(db, Record, unseal, team):
             activity = unseal(row.data)
             start = activity.get('date', '')
             if start:
-                dates[row.id] = (start, max(start, activity.get('endDate') or start))
+                dates[row.team, row.id] = (start, max(start, activity.get('endDate') or start))
     bookings = []
     for row in rows:
+        if row.kind == 'event':
+            continue
+        data = unseal(row.data)
+        event = data.get('event')
+        if (row.team, event) not in dates:
+            continue
         if row.kind == 'module:travel':
-            travel = unseal(row.data)
-            if travel['event'] in dates:
-                start, end = dates[travel['event']]
-                bookings.append(dict(date=start, endDate=end,
-                                     resources=travel.get('staff', [])+travel.get('vehicles', [])))
+            vehicles, staff = data.get('vehicles', []), data.get('staff', [])
+        elif data.get('status') in VEHICLE_RESERVED:
+            # Legacy overrides have no type. Staff IDs are excluded below.
+            vehicles, staff = [data['resource']], []
+        else:
+            continue
+        start, end = dates[row.team, event]
+        bookings.append(dict(team=row.team, event=event, date=start, endDate=end,
+                             vehicles=vehicles, staff=staff, manual=row.kind!='module:travel'))
     return bookings
+
+
+def check_manual_vehicle_booking(bookings, team, event, activity, vehicle):
+    start = activity.get('date')
+    if not start:abort(400, 'Indica la fecha de la actividad antes de reservar el vehículo')
+    end = max(start, activity.get('endDate') or start)
+    for booking in bookings:
+        if booking['team']==team and booking['event']==event:continue
+        if vehicle in booking['vehicles'] and start<=booking['endDate'] and booking['date']<=end:
+            abort(409, 'El vehículo ya está reservado para esas fechas')
+
+
+def check_manual_vehicle_dates(db, Record, unseal, team, event, activity):
+    overrides = db.scalars(select(Record.data).where(Record.kind=='system:resource-availability'))
+    vehicles = set(db.scalars(select(Record.id).where(Record.kind=='module:vehicle')))
+    reserved = [row['resource'] for data in overrides if (row:=unseal(data)).get('event')==event
+                and row.get('status') in VEHICLE_RESERVED and row.get('resource') in vehicles]
+    if reserved:
+        bookings = resource_bookings(db, Record, unseal)
+        for vehicle in reserved:
+            check_manual_vehicle_booking(bookings, team, event, activity, vehicle)
 
 
 def register_resources(app, Record, seal, unseal, audit, require, body):
@@ -40,7 +73,17 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
     def resource_availability():
         records = [unseal(row.data) for row in g.db.scalars(
             select(Record).where(Record.kind=='system:resource-availability'))]
-        return jsonify(records=records, shared=other_team_resource_bookings(g.db, Record, unseal, g.team))
+        bookings = resource_bookings(g.db, Record, unseal)
+        vehicle_ids = set(g.db.scalars(select(Record.id).where(Record.kind=='module:vehicle')))
+        vehicles = []
+        for booking in bookings:
+            ids = [resource for resource in booking['vehicles'] if resource in vehicle_ids]
+            if ids:
+                vehicles.append(dict(team=booking['team'], date=booking['date'], endDate=booking['endDate'],
+                                     vehicles=ids, event=booking['event'] if booking['team']==g.team else None))
+        shared = [dict(date=row['date'], endDate=row['endDate'], resources=row['staff'])
+                  for row in bookings if row['team']!=g.team and row['staff']]
+        return jsonify(records=records, shared=shared, vehicleBookings=vehicles)
 
     @app.post('/api/resource-availability')
     @require('director')
@@ -56,7 +99,8 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         resource=g.db.get(Record,resource_id)
         if not event or event.kind!='event' or not resource or resource.kind not in ('module:staff','module:vehicle'):
             abort(404)
-        if status not in ('Disponible','No disponible','Por confirmar'):
+        vehicle=resource.kind=='module:vehicle'
+        if status not in (('Libre','Reservado','Disponible','No disponible','Por confirmar') if vehicle else ('Disponible','No disponible','Por confirmar')):
             abort(400)
         for travel in g.db.scalars(select(Record).where(Record.kind=='module:travel')):
             trip=unseal(travel.data)
@@ -64,6 +108,13 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
                 abort(409,'El recurso ya está asignado. Modifica la ficha del viaje')
         key=availability_key(event_id,resource_id)
         record=g.db.get(Record,key)
+        if vehicle and status in VEHICLE_RESERVED:
+            check_manual_vehicle_booking(resource_bookings(g.db, Record, unseal),
+                                         g.team, event_id, unseal(event.data), resource_id)
+        if vehicle and status in ('Libre','Disponible','Por confirmar'):
+            if record:g.db.delete(record)
+            audit('resource_availability_updated',resource_id)
+            return jsonify(ok=True)
         content=seal(dict(event=event_id,resource=resource_id,status=status))
         if record:record.data=content
         else:g.db.add(Record(id=key,kind='system:resource-availability',owner_id=g.user.id,data=content))
