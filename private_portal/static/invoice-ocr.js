@@ -129,7 +129,66 @@ window.InvoiceOCR=(()=>{
  throw Error('Selecciona una foto JPG/PNG/WEBP o un PDF.');}finally{if(worker){try{await worker.terminate();}catch{}}if(pdf){try{await pdf.destroy();}catch{}}control.worker=null;}}
  return {number,date,parse,read,spatialText};
 })();
-function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');if(!form)return;const box=document.createElement('section');box.className='card invoice-ocr';box.innerHTML='<h2>Subir ticket o factura</h2><div class="toolbar"><button type="button" class="primary" id="takeInvoicePhoto">Hacer foto y registrar</button><button type="button" id="pickInvoiceFile">Adjuntar factura o foto</button></div><input id="invoiceCamera" type="file" accept="image/*" capture="environment" hidden><input id="invoiceFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden><div class="toolbar"><button type="button" id="readInvoice" class="primary">Leer factura</button><button type="button" id="cancelInvoice" hidden>Cancelar lectura</button></div><p id="invoiceProgress" role="status" aria-live="polite"></p><div id="invoiceDetected"></div><small>La lectura se hace en tu navegador. Al guardar se adjunta el archivo seleccionado. Las fotos de cámara que superen el límite o usen otro formato se preparan en JPG. Solo Dirección podrá descargarlo. Máximo 4 MB y 8 páginas por lectura.</small>';document.getElementById('moduleEditor').before(box);let current=null;
+async function scanInvoiceImage(file){
+ const bitmap=await createImageBitmap(file);
+ const source=document.createElement('canvas');
+ const scale=Math.min(1,2200/Math.max(bitmap.width,bitmap.height));
+ source.width=Math.max(1,Math.round(bitmap.width*scale));
+ source.height=Math.max(1,Math.round(bitmap.height*scale));
+ source.getContext('2d').drawImage(bitmap,0,0,source.width,source.height);
+ bitmap.close();
+ const dialog=document.createElement('dialog');
+ dialog.style.cssText='width:min(92vw,580px);max-height:90vh;overflow:auto;margin:auto;padding:16px';
+ const edges=[['top','Superior'],['right','Derecho'],['bottom','Inferior'],['left','Izquierdo']];
+ dialog.innerHTML=`<form method="dialog"><h2>Escanear factura</h2>
+ <p>Ajusta los bordes si necesitas recortar la factura.</p>
+ <canvas aria-label="Vista previa del escaneo" style="display:block;max-width:100%;max-height:40vh;object-fit:contain;margin:auto"></canvas>
+ <details><summary>Recortar bordes</summary><div class="grid">${edges.map(([id,label])=>`<label>${label}<input name="${id}" type="range" min="0" max="45" value="0"></label>`).join('')}</div></details>
+ <div class="toolbar"><button type="button" id="scanRotate">Girar 90°</button>
+ <label><input type="checkbox" name="contrast"> Mejorar contraste</label></div>
+ <div class="toolbar"><button value="cancel">Cancelar</button><button class="primary" value="scan">Usar escaneo y leer importe</button></div>
+ </form>`;
+ const form=dialog.querySelector('form'),preview=dialog.querySelector('canvas');
+ let turns=0;
+ const draw=()=>{
+  const w=source.width,h=source.height;
+  const left=Math.floor(w*Number(form.elements.left.value)/100);
+  const top=Math.floor(h*Number(form.elements.top.value)/100);
+  const width=w-left-Math.floor(w*Number(form.elements.right.value)/100);
+  const height=h-top-Math.floor(h*Number(form.elements.bottom.value)/100);
+  preview.width=turns%2?height:width;
+  preview.height=turns%2?width:height;
+  const ctx=preview.getContext('2d');
+  ctx.translate(preview.width/2,preview.height/2);
+  ctx.rotate(turns*Math.PI/2);
+  ctx.drawImage(source,left,top,width,height,-width/2,-height/2,width,height);
+  if(form.elements.contrast.checked){
+   const pixels=ctx.getImageData(0,0,preview.width,preview.height);
+   for(let i=0;i<pixels.data.length;i+=4){
+    const luminance=pixels.data[i]*0.2126+pixels.data[i+1]*0.7152+pixels.data[i+2]*0.0722;
+    const contrast=(luminance-128)*1.45+128;
+    pixels.data[i]=pixels.data[i+1]=pixels.data[i+2]=contrast;
+   }
+   ctx.putImageData(pixels,0,0);
+  }
+ };
+ form.addEventListener('input',draw);
+ dialog.querySelector('#scanRotate').onclick=()=>{turns=(turns+1)%4;draw();};
+ document.body.appendChild(dialog);
+ try{
+  draw();
+  const outcome=await new Promise(resolve=>{
+   dialog.addEventListener('close',()=>resolve(dialog.returnValue),{once:true});
+   dialog.showModal();
+  });
+  if(outcome!=='scan')return null;
+  const blob=await new Promise(resolve=>preview.toBlob(resolve,'image/jpeg',0.86));
+  if(!blob)throw Error('No se pudo preparar el escaneo');
+  return new File([blob],'factura-escaneada.jpg',{type:'image/jpeg'});
+ }finally{dialog.remove();}
+}
+
+function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');if(!form)return;const box=document.createElement('section');box.className='card invoice-ocr';box.innerHTML='<h2>Subir ticket o factura</h2><div class="toolbar"><button type="button" class="primary" id="takeInvoicePhoto">Escanear con cámara</button><button type="button" id="pickInvoiceFile">Adjuntar factura o foto</button></div><input id="invoiceCamera" type="file" accept="image/*" capture="environment" hidden><input id="invoiceFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden><div class="toolbar"><button type="button" id="readInvoice" class="primary">Leer factura</button><button type="button" id="cancelInvoice" hidden>Cancelar lectura</button></div><p id="invoiceProgress" role="status" aria-live="polite"></p><div id="invoiceDetected"></div><small>La lectura se hace en tu navegador. Al guardar se adjunta el archivo seleccionado. El escaneo se adjunta como JPG. También puedes adjuntar un PDF escaneado. Solo Dirección podrá descargarlo. Máximo 4 MB y 8 páginas por lectura.</small>';document.getElementById('moduleEditor').before(box);let current=null;
  const camera=box.querySelector('#invoiceCamera'),picker=box.querySelector('#invoiceFile');
  box.querySelector('#takeInvoicePhoto').onclick=()=>camera.click();
  box.querySelector('#pickInvoiceFile').onclick=()=>picker.click();
@@ -137,21 +196,12 @@ function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');i
  const chooseOriginal=async (file,fromCamera)=>{
   const attempt=++selection;
   if(!file)return;
-  if(fromCamera&&(file.size>4*1024*1024||!/^image\/(jpeg|png|webp)$/.test(file.type))){
+  if(fromCamera){
    try{
-    const bitmap=await createImageBitmap(file);
-    const canvas=document.createElement('canvas');
-    const scale=Math.min(1,2000/Math.max(bitmap.width,bitmap.height));
-    canvas.width=Math.max(1,Math.round(bitmap.width*scale));
-    canvas.height=Math.max(1,Math.round(bitmap.height*scale));
-    try{
-     canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
-     const jpeg=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',0.86));
-     if(!jpeg)throw Error('JPEG no disponible');
-     file=new File([jpeg],'foto-ticket.jpg',{type:'image/jpeg'});
-    }finally{bitmap.close();}
+    file=await scanInvoiceImage(file);
+    if(!file)return;
    }catch{
-    if(attempt===selection)message('No se pudo preparar la foto. Adjunta una imagen JPG o PNG de hasta 4 MB.');
+    if(attempt===selection)message('No se pudo escanear la imagen. Puedes adjuntar un PDF, JPG o PNG.');
     return;
    }
   }
@@ -165,6 +215,7 @@ function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');i
   box.querySelector('#invoiceProgress').textContent='Archivo seleccionado: '+file.name+'. Indica el importe y guarda, o pulsa Leer factura para probar el OCR.';
   document.getElementById('moduleEditor').hidden=false;
   form.elements.amount.scrollIntoView?.({block:'nearest'});
+  if(fromCamera)box.querySelector('#readInvoice').click();
  };
  camera.onchange=picker.onchange=e=>{
   const file=e.target.files[0];
