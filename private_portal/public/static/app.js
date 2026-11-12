@@ -142,7 +142,10 @@ function bindNameSearch(input,container){
     const query=normalize(input.value);
     items.forEach(item=>{item.hidden=!normalize(item.dataset.searchName).includes(query);});
     empty.hidden=items.some(item=>!item.hidden);
-    container.querySelectorAll('[data-search-group]').forEach(group=>{group.hidden=![...group.querySelectorAll('[data-search-name]')].some(item=>!item.hidden);});
+    container.querySelectorAll('[data-search-group]').forEach(group=>{
+      group.hidden=![...group.querySelectorAll('[data-search-name]')].some(item=>!item.hidden);
+      if(query&&!group.hidden&&group.tagName==='DETAILS')group.open=true;
+    });
   };
   input.oninput();
 }
@@ -450,7 +453,16 @@ function showRiderInvites(results,invitations){
     catch{input.focus();input.select();}
   });
 }
-function juniorRosterGroups(riders){
+const occidentCategories=['JUV-S23 FEM','JUV-S23 MASC','CADETE MASC','CADETE FEM'];
+const occidentCategoryLabels=['Juvenil / Sub-23 femenino','Juvenil / Sub-23 masculino','Cadete masculino','Cadete femenino'];
+function rosterGroups(riders){
+ if(me.team==='occident'){
+   return [...occidentCategories,''].map((category,index)=>({
+     label:occidentCategoryLabels[index]||'Sin categoría',
+     riders:riders.filter(r=>category?r.category===category:!occidentCategories.includes(r.category)).sort((a,b)=>a.name.localeCompare(b.name,'es'))
+   }));
+ }
+
  return [['2010','Júnior de primer año · 2010'],['2009','Júnior de segundo año · 2009'],['','Año pendiente u otra categoría']].map(([year,label])=>({label,riders:riders.filter(r=>year?String(r.birthYear)===year:!['2009','2010'].includes(String(r.birthYear))).sort((a,b)=>a.name.localeCompare(b.name,'es'))}));
 }
 async function rosterPage(c){
@@ -478,7 +490,11 @@ async function rosterPage(c){
     ${roster.filter(r=>eligible.has(r.id)).map(r=>`<label class="checkline"><input type="checkbox" name="rider" value="${esc(r.id)}" checked>${esc(r.name)}</label>`).join('')}
     <button type="submit" class="primary">Generar enlaces de registro</button><div id="rosterInviteResults" aria-live="polite"></div></form>`:''}
     <label>Buscar corredor<input type="search" id="riderSearch" placeholder="Nombre o apellidos"></label>
-    <div class="card" id="riderSearchResults">${juniorRosterGroups(roster).filter(group=>group.riders.length).map(group=>`<section data-search-group><h2>${esc(group.label)} · ${group.riders.length}</h2>${group.riders.map(r=>`<div class="row" data-search-name="${esc(r.name)}"><strong>${esc(r.name)}</strong><button type="button" data-profile="${esc(r.id)}">Abrir ficha</button><button type="button" data-rider-status="${esc(r.id)}" data-active="false">Dar de baja</button></div>`).join('')}</section>`).join('')}
+    <div class="card" id="riderSearchResults">${rosterGroups(roster).filter(group=>group.riders.length).map(group=>{
+      const label=`${esc(group.label)} · ${group.riders.length}`;
+      const rows=group.riders.map(r=>`<div class="row" data-search-name="${esc(r.name)}"><strong>${esc(r.name)}</strong><button type="button" data-profile="${esc(r.id)}">Abrir ficha</button><button type="button" data-rider-status="${esc(r.id)}" data-active="false">Dar de baja</button></div>`).join('');
+      return me.team==='occident'?`<details class="card" data-search-group><summary>${label}</summary>${rows}</details>`:`<section data-search-group><h2>${label}</h2>${rows}</section>`;
+    }).join('')}
     <p data-no-matches hidden>${roster.length?'No hay corredores que coincidan.':'Aún no hay corredores registrados.'}</p></div><details class="card"><summary>Corredores de baja · ${inactive.length}</summary>${inactive.map(r=>`<div class="row"><strong>${esc(r.name)}</strong><button type="button" data-rider-status="${esc(r.id)}" data-active="true">Volver a dar de alta</button></div>`).join('')||'<p>No hay corredores de baja.</p>'}</details>`;
   c.querySelectorAll('[data-rider-status]').forEach(button=>button.onclick=async()=>{
     const active=button.dataset.active==='true';
@@ -535,12 +551,12 @@ async function prepareIdentityFile(file){
   throw Error('No se pudo abrir esa foto. Selecciona PDF, JPG o PNG de hasta 4 MB.');
  }finally{URL.revokeObjectURL(url);}
 }
-async function profilePage(c,id){const d=await api('/profile/'+id),p=d.profile;const privateAccess=me.id===id||me.documents;const personalFields=[['Nombre','firstName','text'],['Apellidos','surname','text'],['Año de nacimiento','birthYear','text'],['DNI','dni','text'],['Estado del DNI','dniStatus','text'],['Teléfono','phone','tel'],['Dirección','address','text'],['Fecha de nacimiento','birth','date'],['Tutor/a','guardian','text'],['Teléfono tutor/a','guardianPhone','tel'],['Titular de cuenta','bankHolder','text'],['IBAN','iban','text'],['Email tutor/a','guardianEmail','email'],['Segundo tutor/a','guardian2','text'],['Teléfono segundo tutor/a','guardianPhone2','tel'],['Email segundo tutor/a','guardianEmail2','email'],['Población','city','text'],['Código postal','zip','text'],['Provincia','province','text'],['Salida habitual (Bilbao / Zaragoza)','departureDefault','text'],['Punto de recogida','pickupPoint','text']];
+async function profilePage(c,id){const d=await api('/profile/'+id),p=d.profile;const privateAccess=me.id===id||me.documents;const personalFields=[['Nombre','firstName','text'],['Apellidos','surname','text'],['Año de nacimiento','birthYear','text'],['DNI','dni','text'],...(me.team==='occident'?[['Número de licencia / ID UCI','uciId','text']]:[]),['Estado del DNI','dniStatus','text'],['Teléfono','phone','tel'],['Dirección','address','text'],['Fecha de nacimiento','birth','date'],['Tutor/a','guardian','text'],['Teléfono tutor/a','guardianPhone','tel'],['Titular de cuenta','bankHolder','text'],['IBAN','iban','text'],['Email tutor/a','guardianEmail','email'],['Segundo tutor/a','guardian2','text'],['Teléfono segundo tutor/a','guardianPhone2','tel'],['Email segundo tutor/a','guardianEmail2','email'],['Población','city','text'],['Código postal','zip','text'],['Provincia','province','text'],['Salida habitual (Bilbao / Zaragoza)','departureDefault','text'],['Punto de recogida','pickupPoint','text']];
 const healthFields=[
  ['medication','¿Tomas alguna medicación?','¿Cuál?'],
  ['allergies','¿Tienes alguna alergia?','¿Cuáles?'],
  ['intolerances','¿Tienes alguna intolerancia?','¿Cuáles?']
-];c.innerHTML=`<h1>${me.id===id?'Mi ficha':esc(roster.find(r=>r.id===id)?.name||'Ficha del corredor')}</h1>${me.id!==id?'<button type="button" id="backToRoster">Volver a Corredores</button>':''}<form method="post" id="profile" class="card"><h2>Datos deportivos y tallas</h2><div class="grid">${field('Club','club','text',p.club)}${field('Preparador','coach','text',p.coach)}<label>Días de competición en 2026<input name="competitionDays2026" type="number" min="0" max="365" step="1" placeholder="Sin indicar" value="${esc(p.competitionDays2026??'')}"></label>${[['bike','Bicicleta'],['bikeSize','Talla bicicleta'],['helmet','Talla de casco (ej. M o 54–58 cm)'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)'],['saddleToBar','Distancia sillín–manillar (mm)']].map(([key,label])=>field(label,key,'text',p[key])).join('')}${clothes.map(item=>select(item,'size:'+item,['','XXS','XS','S','M','L','XL','XXL','XXXL'],p.sizes?.[item]||'')).join('')}</div>${privateAccess?`<h2>Datos personales privados</h2><div class="grid">${personalFields.map(([label,key,type])=>field(label,key,type,p[key])).join('')}</div><h2>Medicación, alergias e intolerancias</h2>
+];c.innerHTML=`<h1>${me.id===id?'Mi ficha':esc(roster.find(r=>r.id===id)?.name||'Ficha del corredor')}</h1>${me.id!==id?'<button type="button" id="backToRoster">Volver a Corredores</button>':''}<form method="post" id="profile" class="card"><h2>Datos deportivos y tallas</h2><div class="grid">${me.team==='occident'&&me.role==='director'?`<label>Categoría<select name="category"><option value="">Sin categoría</option>${occidentCategories.map((category,index)=>`<option value="${category}" ${p.category===category?'selected':''}>${occidentCategoryLabels[index]}</option>`).join('')}</select></label>`:''}${field('Club','club','text',p.club)}${field('Preparador','coach','text',p.coach)}<label>Días de competición en 2026<input name="competitionDays2026" type="number" min="0" max="365" step="1" placeholder="Sin indicar" value="${esc(p.competitionDays2026??'')}"></label>${[['bike','Bicicleta'],['bikeSize','Talla bicicleta'],['helmet','Talla de casco (ej. M o 54–58 cm)'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)'],['saddleToBar','Distancia sillín–manillar (mm)']].map(([key,label])=>field(label,key,'text',p[key])).join('')}${clothes.map(item=>select(item,'size:'+item,['','XXS','XS','S','M','L','XL','XXL','XXXL'],p.sizes?.[item]||'')).join('')}</div>${privateAccess?`<h2>Datos personales privados</h2><div class="grid">${personalFields.map(([label,key,type])=>field(label,key,type,p[key])).join('')}</div><h2>Medicación, alergias e intolerancias</h2>
 <small>Información privada para el propio corredor y Dirección con permiso de documentos.</small>
 <div class="grid">${healthFields.map(([key,question,detail])=>`<fieldset>${select(question,key+'Status',[['','Sin indicar'],'Sí','No'],p[key+'Status']||'')}<label>${detail}<textarea name="${key}Details" maxlength="250" rows="3">${esc(p[key+'Details']||'')}</textarea></label></fieldset>`).join('')}</div>`:''}<label>Permitir a Comunicación acceder a mis fotos para las publicaciones del equipo<input type="checkbox" name="photoConsent" ${p.photoConsent?'checked':''}></label><small>En menores, Dirección debe conservar la autorización de sus representantes antes de marcar este permiso.</small><button type="submit" class="primary">Guardar ficha</button></form>${privateAccess?`<form method="post" id="upload" class="card"><h2>Documentos privados</h2>${select('Tipo de documento','kind',[['dni','DNI · anverso'],['dni_reverso','DNI · reverso'],['licencia','Licencia federativa · anverso'],['licencia_reverso','Licencia federativa · reverso'],['contrato_club','Contrato del club'],['sepa','Mandato SEPA'],['autorizacion','Autorización de tutores']])}<label>Foto o PDF · máximo 4 MB<input type="file" name="file" accept="image/*,application/pdf,.heic,.heif" required></label><small>Sube una foto legible de cada cara de la licencia por separado. También puedes subir tu DNI. Dirección con permiso de documentos podrá consultarla.</small><button type="submit">Subir documento privado</button></form>`:''}${privateAccess?`<section class="card"><h2>Fotos del corredor</h2><p>Sube las dos fotos para preparar las publicaciones del equipo.</p><div class="grid">${[['portrait','Foto de medio cuerpo con la equipación del equipo'],['action','Foto en acción sobre la bicicleta']].map(([kind,label])=>`<form method="post" id="photo-${kind}"><label>${label}<input type="file" name="file" accept="image/jpeg,image/png" required></label><small>JPG o PNG · máximo 3 MB</small><button type="submit">Subir foto</button></form>`).join('')}</div></section>`:''}<div id="documents" class="card"></div>`;const upload=c.querySelector('#upload');
 const profile=c.querySelector('#profile');
@@ -549,7 +565,7 @@ if(upload){
  upload.querySelector('h2').textContent='1. Escanear y subir documentos';
  addIdentityOCR(upload,profile);
 }
-const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('roster');bindForm('profile',async(f,data)=>{const sizes={};Object.entries(data).filter(([k])=>k.startsWith('size:')).forEach(([k,v])=>sizes[k.slice(5)]=v);const output={club:data.club,coach:data.coach,sizes,photoConsent:f.elements.photoConsent.checked,competitionDays2026:data.competitionDays2026===''?'':Number(data.competitionDays2026)};for(const key of ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'])output[key]=data[key]||'';if(privateAccess){
+const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('roster');bindForm('profile',async(f,data)=>{const sizes={};Object.entries(data).filter(([k])=>k.startsWith('size:')).forEach(([k,v])=>sizes[k.slice(5)]=v);const output={club:data.club,coach:data.coach,sizes,photoConsent:f.elements.photoConsent.checked,competitionDays2026:data.competitionDays2026===''?'':Number(data.competitionDays2026)};for(const key of ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'])output[key]=data[key]||'';if(f.elements.category)output.category=data.category;if(privateAccess){
  for(const [,key] of personalFields)output[key]=data[key];
  for(const [key] of healthFields){
   output[key+'Status']=data[key+'Status'];

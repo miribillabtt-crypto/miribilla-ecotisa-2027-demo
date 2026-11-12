@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from PIL import Image
 from roster_import import normalize
 from team_scope import NETKOM, OCCIDENT, configure_team_scope
+from roster_import import OCCIDENT_CATEGORIES, import_roster
 
 Base=declarative_base()
 def uid(): return secrets.token_hex(16)
@@ -199,6 +200,8 @@ def create_app(test_config=None):
         g.db.execute(select(1))
         calendar_receipt=app.config.get('NETKOM_CALENDAR_RECEIPT')
         health_details={'netkomCalendar2027':calendar_receipt} if calendar_receipt else {}
+        occident_receipt=app.config.get('OCCIDENT_ROSTER_IMPORT_RECEIPT')
+        if occident_receipt:health_details['occidentRoster']= {key:occident_receipt[key] for key in ('total','added','updated','conflicts')}
         rider_receipt=app.config.get('RIDER_ACCOUNT_RECEIPT')
         if rider_receipt:return jsonify(status='ok',riderAccountsVerified=rider_receipt['verified'],existingAccounts=rider_receipt['existingAccounts'],**health_details)
         receipt=app.config.get('ROSTER_IMPORT_RECEIPT')
@@ -492,14 +495,18 @@ def create_app(test_config=None):
     def profile_save(target):
         u=runner_target(target);d=body();p=unseal(u.profile)
         allowed={'competitionDays2026','coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
-        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus','medicationStatus','medicationDetails','allergiesStatus','allergiesDetails','intolerancesStatus','intolerancesDetails'}
-        if g.user.role=='director':allowed|={'quantities'}
+        if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus','uciId','medicationStatus','medicationDetails','allergiesStatus','allergiesDetails','intolerancesStatus','intolerancesDetails'}
+        if g.user.role=='director':allowed|={'quantities','category'}
         for k,v in d.items():
             if k not in allowed:abort(403)
             if k in ('sizes','quantities'):
                 if not isinstance(v,dict) or any(key not in CLOTHES for key in v):abort(400)
                 if k=='sizes' and any(val not in ['','XXS','XS','S','M','L','XL','XXL','XXXL'] for val in v.values()):abort(400)
                 if k=='quantities' and any(type(val)!=int or val<0 or val>100 for val in v.values()):abort(400)
+            elif k=='category':
+                if v not in ('',*OCCIDENT_CATEGORIES):abort(400,'Categoría no válida')
+            elif k=='uciId':
+                if not isinstance(v,str) or (v and (len(v)!=11 or not v.isascii() or not v.isdigit())):abort(400,'El ID UCI debe tener 11 cifras')
             elif k=='competitionDays2026':
                 if v!='' and (type(v)!=int or not 0<=v<=365):abort(400,'Días de competición: indica un entero entre 0 y 365')
             elif k in ('medicationStatus','allergiesStatus','intolerancesStatus'):
@@ -668,6 +675,7 @@ def create_app(test_config=None):
                 profile=unseal(u.profile)
                 year=str(profile.get('birthYear') or str(profile.get('birth') or '')[:4]).strip()
                 item['birthYear']=year if len(year)==4 and year.isdigit() else ''
+                if g.team==OCCIDENT:item['category']=profile.get('category','')
             riders.append(item)
         return jsonify(riders=riders)
     @app.post('/api/roster/<target>/status')
@@ -792,8 +800,10 @@ def create_app(test_config=None):
         seed_direction_account(Sessions,User,Record,cipher,shared_hash)
     roster_payload=os.environ.get('ROSTER_IMPORT_DATA')
     if not app.testing and roster_payload and roster_payload!='[]':
-        from roster_import import import_roster
         app.config['ROSTER_IMPORT_RECEIPT']=import_roster(Sessions,Record,User,cipher,roster_payload)
+    occident_roster=os.environ.get('OCCIDENT_ROSTER_IMPORT_DATA')
+    if not app.testing and occident_roster and occident_roster!='[]':
+        app.config['OCCIDENT_ROSTER_IMPORT_RECEIPT']=import_roster(Sessions,Record,User,cipher,occident_roster,OCCIDENT)
     if not app.testing:
         from calendar_seed import seed_calendar
         app.config['NETKOM_CALENDAR_RECEIPT']=seed_calendar(Sessions,Record,cipher)
