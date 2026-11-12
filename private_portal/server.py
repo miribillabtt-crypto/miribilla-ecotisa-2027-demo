@@ -208,6 +208,8 @@ def create_app(test_config=None):
         return jsonify(status='ok',rosterImported=receipt['total'],**health_details) if receipt else jsonify(status='ok',**health_details)
     @app.get('/')
     def index():return render_template('index.html')
+    @app.get('/privacidad-bancaria')
+    def bank_privacy():return render_template('bank_privacy.html')
     @app.get('/organizacion')
     @require('director')
     def organization():
