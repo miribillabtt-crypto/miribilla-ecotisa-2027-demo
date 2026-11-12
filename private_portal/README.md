@@ -45,3 +45,9 @@ Vercel: framework Flask, raíz `private_portal`, entrada `app.py`, activos `publ
 Las pruebas cubren el aislamiento por rol y corredor, los flujos de archivo/restauración, protección documental por objeto, cookies, formularios, importaciones atómicas, consentimiento de fotos, convocatorias y exportación de listados sin DNI ni IBAN. Las comprobaciones DOM cubren navegación y guardado representativo; no sustituyen pruebas en móviles reales ni revisión de seguridad externa.
 
 Prueba del parser OCR: `node qa/check-ocr.cjs` tras instalar las dependencias de QA.
+
+### Laboral Kutxa y tesorería
+
+Dirección puede usar la previsión a 13 semanas con un saldo inicial introducido manualmente y los vencimientos de Ingresos y gastos. El saldo contable sincronizado en el día se propone como saldo inicial.
+
+Para activar la conexión de consulta, registra una aplicación en el panel de Enable Banking y registra la URL de retorno `PUBLIC_ORIGIN + /banco/laboral-kutxa/retorno`. Guarda `ENABLE_BANKING_APP_ID` y `ENABLE_BANKING_PRIVATE_KEY` como variables sensibles del servidor de producción y vuelve a desplegar. El equipo de importación es Netkom por defecto y puede elegirse con `LABORAL_KUTXA_TEAM` antes de vincular la cuenta. Vincula y sincroniza desde una cuenta propietaria de Dirección. Los movimientos ya importados se conservan al revocar el consentimiento.

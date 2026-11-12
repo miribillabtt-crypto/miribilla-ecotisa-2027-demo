@@ -746,6 +746,15 @@ function updateTeamHeader(){
 async function init(initialPage='home'){try{if(window.DemoPortal?.active&&!DemoPortal.role){DemoPortal.selector();return;}const fragment=new URLSearchParams(location.hash.slice(1));const token=fragment.get('activar');const data=await api('/me');me=data.user;csrf=data.csrf||'';
  if(me){me.team=data.team||'netkom';me.canSwitchTeam=Boolean(data.canSwitchTeam);me.canInviteUsers=Boolean(data.canInviteUsers);if(data.teams)portalTeams={...portalTeams,...data.teams};}
  updateTeamHeader();
- if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}await navigate(initialPage);}catch(e){me=null;updateTeamHeader();login();message(e.message);}}
+ if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}
+ if(fragment.has('lk')&&me.role==='director'){
+  history.replaceState(null,'',location.pathname);
+  let result;
+  try{await api('/bank/laboral-kutxa/finish','POST',{code:fragment.get('code')||'',state:fragment.get('state')||''});
+   result='Autorización recibida. Selecciona la cuenta de la asociación.';
+  }catch(error){result=error.message;}
+  await navigate('bank');message(result);return;
+ }
+ await navigate(initialPage);}catch(e){me=null;updateTeamHeader();login();message(e.message);}}
 window.PortalEnhancements?.start(()=>me?.role==='director');
 init();

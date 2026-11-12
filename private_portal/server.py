@@ -823,6 +823,8 @@ def create_app(test_config=None):
     register_invoices(app,Record,Document,cipher,seal,unseal,audit,require)
     from bank_reconciliation import register_bank_reconciliation
     register_bank_reconciliation(app,Record,Document,seal,unseal,audit,require,body)
+    from laboral_kutxa import register_laboral_kutxa
+    register_laboral_kutxa(app,Record,seal,unseal,audit,require,body)
     from invoice_exports import register_invoice_exports
     register_invoice_exports(app,Record,Document,cipher,unseal,audit,require)
     from calendar_exports import register_calendar_exports

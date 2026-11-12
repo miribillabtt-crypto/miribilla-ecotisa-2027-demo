@@ -14,7 +14,7 @@ SPECS={
  'travel':dict(event='event',manager='s',hotel='s',hotelAddress='s',hotelPhone='s',booking='s',departureBilbao='s',departureZaragoza='s',meeting='s',plan='s',staff='staff[]',vehicles='vehicle[]',rooming='s',registrationDeadline='s',registrationStatus='s',registrationReference='s',routeUrl='url',scheduleUrl='url'),
  'result':dict(event='event',rider='runner',place='i',days='i',discipline='s',notes='s'),
  'days':dict(event='event',person='person',days='i',function='s',notes='s'),
- 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',payerClub='club',paidBy='s',paymentDate='date',allocationRule='allocation',miribillaPercent='i',notes='s'),
+ 'entry':dict(date='date',event='event?',direction='direction',category='s',budget='budget?',concept='s',counterparty='s',reference='s',taxId='s',baseAmount='money',taxAmount='money',amount='money',status='s',payerClub='club',paidBy='s',paymentDate='date',dueDate='date',allocationRule='allocation',miribillaPercent='i',notes='s'),
  'budget':dict(category='s',amount='money',notes='s'),
  'bank':dict(date='date',concept='s',reference='s',amount='money',direction='direction',matched='s'),
  'charge':dict(event='event?',rider='runner',concept='s',amount='money',status='s',notes='s'),
@@ -330,10 +330,13 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   previous=unseal(r.data) if kind=='entry' else None
   if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
   if kind=='entry' and previous:
-   for key in ('payerClub','paidBy','paymentDate','allocationRule','miribillaPercent'):
+   for key in ('payerClub','paidBy','paymentDate','dueDate','allocationRule','miribillaPercent'):
     if key not in payload and key in previous:payload[key]=previous[key]
   data=validate(kind,payload,previous)
-  if kind=='bank':validate_bank_link(Record,unseal,data,record_id)
+  if kind=='bank':
+   validate_bank_link(Record,unseal,data,record_id)
+   bank_import_id=unseal(r.data).get('bankImportId')
+   if bank_import_id:data['bankImportId']=bank_import_id
   if kind=='travel':
    lock_travel()
    if any(x.id!=r.id and unseal(x.data)['event']==data['event'] for x in rows(kind)):abort(409,'Ya hay planning para esta actividad; edítalo')
