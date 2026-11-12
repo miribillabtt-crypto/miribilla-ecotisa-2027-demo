@@ -13,16 +13,22 @@ const moduleSpecs={
  license:[['rider','Corredor','runner'],['number','Número de licencia'],['status','Estado',['No aportada','Pendiente de revisión','Verificada','Caducada']],['expiration','Caducidad','date'],['notes','Observaciones','textarea']],
  sport:[['rider','Corredor','runner'],['bike','Bicicleta · marca y modelo'],['bikeSize','Talla bicicleta'],['helmet','Talla casco'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)','integer'],['saddleToBar','Distancia sillín–manillar (mm)','integer'],['coach','Preparador'],['club','Club de procedencia'],['notes','Notas deportivas','textarea']]
 };
-const featureViews={clubsettlement:clubSettlementPage,shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
+const featureViews={vehiclelogs:vehicleLogsPage,clubsettlement:clubSettlementPage,shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
 const euros=n=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format((Number(n)||0)/100);
 let moduleContext={};
 async function dashboardPage(c){
- if(me.role!=='director'){c.innerHTML='<h1>Mi equipo</h1><p>Utiliza el menú para consultar tus actividades y tu ficha.</p>';return;}
+ if(me.role!=='director'){c.innerHTML='<h1>Mi equipo</h1><p>Utiliza el menú para consultar tus actividades y tu ficha.</p>';
+ if(me.role==='technician'){
+  c.insertAdjacentHTML('beforeend','<button type="button" class="primary" id="quickVehicleKm">Registrar km</button>');
+  c.querySelector('#quickVehicleKm').onclick=()=>navigate('vehiclelogs');
+ }
+ return;}
  const s=await api('/summary');
  const actions=[
   ['calendar','Calendario','Carreras, convocatorias, viajes y gastos por actividad'],
   ['roster','Equipo','Corredores, fichas, licencias y ropa'],
   ['resources','Técnicos y vehículos','Disponibilidad, fichas y accesos técnicos'],
+  ['vehiclelogs','Registrar km','Salida, regreso e historial de vehículos'],
   ['conta','Contabilidad','Facturas, cobros por corredor y conciliación'],
  ];
  c.innerHTML=`<h1>Panel de Dirección</h1>
@@ -424,8 +430,9 @@ async function resourcesPage(c){
  const director=me.role==='director';
  c.innerHTML=`<h1>Técnicos y vehículos</h1><div class="toolbar">
   ${director?'':'<button type="button" id="availabilityTab">Disponibilidad y convocatorias</button>'}
-  <button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button>
+  <button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button><button type="button" class="primary" id="resourceVehicleKm">Registrar km</button>
  </div><div id="resourcescontent"></div>`;
+ c.querySelector('#resourceVehicleKm').onclick=()=>navigate('vehiclelogs');
  const content=c.querySelector('#resourcescontent');
  const availability=c.querySelector('#availabilityTab');
  const show=async kind=>{
@@ -699,4 +706,47 @@ async function clubSettlementPage(c){
 function settlementInvoiceTable(rows,pending){
  if(!rows.length)return '<div class="card">No hay facturas en este apartado.</div>';
  return `<div class="card scroll"><table><thead><tr><th>Fecha pago</th><th>Factura / concepto</th><th>Importe</th><th>Club que adelanta</th><th>Quién paga</th><th>Criterio</th>${pending?'<th>Revisar</th>':'<th>Miribilla</th><th>Ecotisa</th>'}<th></th></tr></thead><tbody>${rows.map(row=>`<tr><td>${esc(row.paymentDate||'Sin indicar')}</td><td>${esc(row.reference||row.concept||row.counterparty||'Sin concepto')}</td><td>${euros(row.amount)}</td><td>${esc(row.payerClub||'Sin asignar')}</td><td>${esc(row.paidBy||'Sin indicar')}</td><td>${esc(row.allocationRule==='Mitad'?'50 % cada club':row.allocationRule==='Personalizado'?row.miribillaPercent+' % Miribilla / '+(100-row.miribillaPercent)+' % Ecotisa':row.allocationRule||'Pendiente')}</td>${pending?`<td>${esc(row.issues.join(' · '))}</td>`:`<td>${euros(row.shares.Miribilla)}</td><td>${euros(row.shares.Ecotisa)}</td>`}<td><button type="button" data-settlement-edit="${esc(row.id)}">Completar / editar</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+
+async function vehicleLogsPage(c){
+ const [{records},{records:vehicles}]=await Promise.all([api('/vehicle-logs'),api('/modules/vehicle')]);
+ const open=records.filter(log=>log.end===null);
+ const completed=records.filter(log=>log.end!==null);
+ const totals=new Map();
+ for(const log of completed){
+  const item=totals.get(log.vehicle)||{name:log.name,km:0};
+  item.km+=log.end-log.start;
+  totals.set(log.vehicle,item);
+ }
+ const km=value=>new Intl.NumberFormat('es-ES').format(value)+' km';
+ const time=value=>new Date(value).toLocaleString('es-ES',{timeZone:'Europe/Madrid'});
+ const options=[['','Selecciona un vehículo'],...vehicles.filter(v=>!open.some(log=>log.vehicle===v.id)).map(v=>[v.id,v.name])];
+ c.innerHTML=`<h1>Gestión de vehículos</h1>
+ <form id="vehicleDeparture" class="card"><h2>Registrar salida</h2><div class="grid">
+ ${select('Vehículo','vehicle',options)}
+ <label>Km de salida<input type="number" name="start" min="0" max="9999999" step="1" inputmode="numeric" required></label>
+ <label>Motivo<input name="purpose" maxlength="250" placeholder="Carrera, entrenamiento, taller…"></label>
+ </div><button type="submit" class="primary">Guardar salida</button></form>
+ <h2>Salidas abiertas</h2>${open.map(log=>`<div class="card"><strong>${esc(log.name)}</strong>
+ <p>${esc(log.driver)} · ${esc(time(log.started))} · Salida: ${km(log.start)}</p>
+ ${me.role==='director'||log.user===me.id?`<form id="return-${esc(log.id)}">
+ <div class="grid"><label>Km de regreso<input type="number" name="end" min="${log.start}" max="9999999" step="1" inputmode="numeric" required></label>
+ <label>Observaciones<input name="notes" maxlength="1000" placeholder="Combustible, incidencias…"></label></div>
+ <button type="submit" class="primary">Registrar regreso</button></form>`:''}</div>`).join('')||'<p>No hay salidas abiertas.</p>'}
+ <h2>Historial</h2>${completed.length?`<p>${[...totals.values()].map(item=>`${esc(item.name)} · ${km(item.km)}`).join(' · ')}</p>
+ <div class="card scroll"><table><thead><tr><th>Vehículo</th><th>Conductor</th><th>Salida</th><th>Regreso</th><th>Km recorridos</th><th>Motivo y observaciones</th></tr></thead>
+ <tbody>${completed.map(log=>`<tr><td>${esc(log.name)}</td><td>${esc(log.driver)}</td>
+ <td>${esc(time(log.started))}<br>${km(log.start)}</td><td>${esc(time(log.finished))}<br>${km(log.end)}</td><td>${km(log.end-log.start)}</td>
+ <td>${esc([log.purpose,log.notes].filter(Boolean).join(' · '))}</td></tr>`).join('')}</tbody></table></div>`:'<p>No hay trayectos cerrados.</p>'}`;
+ c.querySelector('#vehicleDeparture select').required=true;
+ bindForm('vehicleDeparture',async(_,data)=>{
+  await api('/vehicle-logs','POST',{vehicle:data.vehicle,start:Number(data.start),purpose:data.purpose});
+  await vehicleLogsPage(c);message('Salida registrada.');
+ });
+ for(const log of open){
+  bindForm('return-'+log.id,async(_,data)=>{
+   await api('/vehicle-logs/'+encodeURIComponent(log.id)+'/close','POST',{end:Number(data.end),notes:data.notes});
+   await vehicleLogsPage(c);message('Regreso registrado. Distancia: '+km(Number(data.end)-log.start)+'.');
+  });
+ }
 }
