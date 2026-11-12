@@ -975,13 +975,27 @@ def test_bank_xlsx_preview_and_expense_reconciliation(env):
  endpoint='/api/bank/reconciliation'
  assert runner.get(endpoint).status_code==403
  movements={row['reference']:row for row in director.get(endpoint).json['movements']}
- assert set(movements)=={'HOTEL-1','GAS-1'}
+ assert set(movements)=={'HOTEL-1','GAS-1','IN-1'}
+ assert director.get(endpoint).json['pendingInvoices'][0]['id']==expense
+ assert movements['IN-1']['state']=='Sin factura'
  assert movements['HOTEL-1']['state']=='Coincidencia única'
  assert movements['GAS-1']['state']=='Sin factura'
  assert director.post(endpoint+'/'+movements['GAS-1']['id'],json={'invoice':expense},headers=h).status_code==400
  assert director.post(endpoint+'/'+movements['HOTEL-1']['id'],json={'invoice':expense},headers=h).status_code==200
  assert director.post('/api/bank/import',json={'rows':rows},headers=h).json['imported']==0
  assert any(row['state']=='Conciliado' for row in director.get(endpoint).json['movements'])
+ income=director.post('/api/modules/entry',json={'direction':'Ingreso','amount':10000,'counterparty':'Patrocinador'},headers=h).json['id']
+ same_amount_expense=director.post('/api/modules/entry',json={'direction':'Gasto','amount':10000,'counterparty':'Proveedor'},headers=h).json['id']
+ for entry in (income,same_amount_expense):
+  assert director.post('/api/invoices/'+entry,data={'file':(io.BytesIO(scan.getvalue()),'factura.png')},headers=h).status_code==200
+ incoming=next(row for row in director.get(endpoint).json['movements'] if row['reference']=='IN-1')
+ assert [invoice['id'] for invoice in incoming['candidates']]==[income]
+ incoming_path=endpoint+'/'+incoming['id']
+ assert director.post(incoming_path,json={'invoice':same_amount_expense},headers=h).status_code==400
+ assert director.post(incoming_path,json={'invoice':income},headers=h).status_code==200
+ assert [invoice['id'] for invoice in director.get(endpoint).json['pendingInvoices']]==[same_amount_expense]
+ assert director.post(incoming_path,json={'invoice':''},headers=h).status_code==200
+ assert {invoice['id'] for invoice in director.get(endpoint).json['pendingInvoices']}=={income,same_amount_expense}
 
 def test_direction_removes_and_restores_event_without_losing_linked_data(env):
  app,ids,login,_=env

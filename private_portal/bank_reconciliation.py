@@ -1,4 +1,4 @@
-"""Bank statement preview and confirmed one-to-one expense reconciliation."""
+"""Bank statement preview and confirmed one-to-one invoice reconciliation."""
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -172,45 +172,54 @@ def register_bank_reconciliation(app, Record, Document, seal, unseal, audit, req
             abort(400, 'Selecciona un Excel .xlsx válido')
         return jsonify(rows=rows)
 
-    def reconciliation_data():
-        moves = [(row,data) for row,data in bank_rows(Record,unseal,'bank') if data.get('direction')=='Gasto']
-        entries = {row.id:data for row,data in bank_rows(Record,unseal,'entry')
-                   if data.get('direction')=='Gasto' and data.get('status')!='Anulado'}
-        documents = defaultdict(list)
-        for document_id,kind in g.db.execute(select(Document.id,Document.kind).where(Document.kind.startswith('invoice:'))):
-            documents[kind.removeprefix('invoice:')].append(document_id)
-        links = Counter(data.get('matched') for _,data in bank_rows(Record,unseal,'bank') if data.get('matched'))
-        by_amount = defaultdict(list)
-        for entry_id,data in entries.items():
-            if documents[entry_id] and not links[entry_id]:
-                by_amount[data['amount']].append(entry_id)
-        return moves,entries,documents,links,by_amount
-
     @app.get('/api/bank/reconciliation')
     @require('director')
     def reconciliation():
-        moves,entries,documents,links,by_amount = reconciliation_data()
-        result=[]
-        unmatched = Counter(data['amount'] for _,data in moves if not data.get('matched'))
+        movements = bank_rows(Record, unseal, 'bank')
+        entries = {row.id: data for row, data in bank_rows(Record, unseal, 'entry')
+                   if data.get('status') != 'Anulado'}
+        documents = defaultdict(list)
+        for document_id, kind in g.db.execute(
+            select(Document.id, Document.kind).where(Document.kind.startswith('invoice:'))
+        ):
+            documents[kind.removeprefix('invoice:')].append(document_id)
+        links = Counter(data['matched'] for _, data in movements if data.get('matched'))
+
+        def match_key(data):
+            return data.get('direction'), data.get('amount')
+
         def invoice(entry_id):
-            entry=entries[entry_id]
-            return dict(id=entry_id,date=entry.get('date',''),concept=entry.get('concept',''),
-                        supplier=entry.get('counterparty',''),reference=entry.get('reference',''),
-                        amount=entry['amount'],files=documents[entry_id])
-        for row,data in moves:
-            target=data.get('matched')
-            candidates=by_amount[data['amount']]
+            entry = entries[entry_id]
+            return dict(id=entry_id, date=entry.get('date', ''), concept=entry.get('concept', ''),
+                        supplier=entry.get('counterparty', ''), reference=entry.get('reference', ''),
+                        amount=entry['amount'], direction=entry.get('direction', ''),
+                        files=documents[entry_id])
+
+        pending = [invoice(entry_id) for entry_id in entries
+                   if documents[entry_id] and not links[entry_id]]
+        pending.sort(key=lambda row: (row['date'], row['id']), reverse=True)
+        candidates_by_amount = defaultdict(list)
+        for item in pending:
+            candidates_by_amount[match_key(item)].append(item)
+
+        unmatched = Counter(match_key(data) for _, data in movements if not data.get('matched'))
+        result = []
+        for row, data in movements:
+            target = data.get('matched')
+            key = match_key(data)
+            candidates = candidates_by_amount[key] if not target else []
             if target:
-                same=target in entries and entries[target]['amount']==data['amount'] and links[target]==1
-                state='Conciliado' if same and documents[target] else 'Sin factura' if same else 'Revisar enlace'
+                same = target in entries and match_key(entries[target]) == key and links[target] == 1
+                state = ('Conciliado' if documents[target] else 'Sin factura') if same else 'Revisar enlace'
             elif candidates:
-                state='Coincidencia única' if len(candidates)==1 and unmatched[data['amount']]==1 else 'Revisar coincidencias'
+                state = 'Coincidencia única' if len(candidates) == unmatched[key] == 1 else 'Revisar coincidencias'
             else:
-                state='Sin factura'
-            result.append(dict(data,id=row.id,state=state,
+                state = 'Sin factura'
+            result.append(dict(data, id=row.id, state=state,
                                invoice=invoice(target) if target in entries else None,
-                               candidates=[invoice(key) for key in candidates] if not target else []))
-        return jsonify(movements=sorted(result,key=lambda row:(row.get('date',''),row['id']),reverse=True))
+                               candidates=candidates))
+        result.sort(key=lambda row: (row.get('date', ''), row['id']), reverse=True)
+        return jsonify(movements=result, pendingInvoices=pending)
 
     @app.post('/api/bank/reconciliation/<movement_id>')
     @require('director')
@@ -223,8 +232,6 @@ def register_bank_reconciliation(app, Record, Document, seal, unseal, audit, req
         if not movement or movement.kind!='module:bank':
             abort(404)
         data=unseal(movement.data)
-        if data.get('direction')!='Gasto':
-            abort(400, 'Selecciona un cargo bancario')
         data['matched']=target
         if target:
             validate_bank_link(Record,unseal,data,movement_id)

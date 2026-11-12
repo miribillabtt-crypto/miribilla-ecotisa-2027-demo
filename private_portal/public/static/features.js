@@ -659,22 +659,37 @@ async function callsPage(c){
  c.querySelectorAll('[data-planning]').forEach(button=>button.onclick=()=>navigate('planning'));
 }
 async function archivePage(c){const d=await api('/archive');c.innerHTML='<h1>Registros archivados</h1><div class="card">'+(d.records.map(r=>`<div class="row"><span>${esc(moduleLabels[r.kind]||r.kind)} · ${esc(r.name||r.concept||r.reason||r.hotel||r.number||r.date||r.id)}</span><button data-restore="${r.id}">Restaurar</button></div>`).join('')||'No hay registros archivados.')+'</div>';c.querySelectorAll('[data-restore]').forEach(b=>b.onclick=async()=>{try{await api('/archive/'+b.dataset.restore+'/restore','POST',{});await archivePage(c);}catch(e){message(e.message);}});}
-async function bankPanel(container){
- const {movements=[]}=await api('/bank/reconciliation');
+async function bankPanel(container,filters={month:'',direction:''},data=null){
+ data=data||await api('/bank/reconciliation');
+ const {movements:allMovements=[],pendingInvoices:allInvoices=[]}=data;
+ const inScope=row=>(!filters.month||row.date?.startsWith(filters.month))&&(!filters.direction||row.direction===filters.direction);
+ const movements=allMovements.filter(inScope);
+ const pendingInvoices=allInvoices.filter(inScope);
  const groups=[
   ['Conciliados',movements.filter(row=>row.state==='Conciliado')],
-  ['Facturas por revisar',movements.filter(row=>['Coincidencia única','Revisar coincidencias','Revisar enlace'].includes(row.state))],
-  ['Cargos sin factura',movements.filter(row=>row.state==='Sin factura')]
+  ['Movimientos por revisar',movements.filter(row=>['Coincidencia única','Revisar coincidencias','Revisar enlace'].includes(row.state))],
+  ['Movimientos sin factura',movements.filter(row=>row.state==='Sin factura')]
  ];
- const total=rows=>euros(rows.reduce((sum,row)=>sum+row.amount,0));
+ const total=rows=>['Gasto','Ingreso'].map(direction=>{
+  const amount=rows.filter(row=>row.direction===direction).reduce((sum,row)=>sum+row.amount,0);
+  return direction==='Gasto'?'Cargos '+euros(amount):'Abonos '+euros(amount);
+ }).join(' · ');
  const links=invoice=>(invoice?.files||[]).map((id,index)=>`<a href="/api/invoice-file/${encodeURIComponent(id)}">Justificante ${index+1}</a>`).join(' · ');
  const invoiceLabel=invoice=>[invoice.date,invoice.supplier||invoice.concept||'Factura',invoice.reference].filter(Boolean).join(' · ');
- container.innerHTML=`<h2>Conciliar gastos con facturas</h2>
-  <p>Las propuestas coinciden por importe total. Comprueba la fecha y el proveedor antes de confirmar.</p>
+ container.innerHTML=`<h2>Conciliación bancaria</h2>
+  <p>Comprueba la fecha y la contraparte antes de confirmar una coincidencia por importe.</p>
+  <div class="grid">
+   <label>Mes<input type="month" data-bank-month value="${esc(filters.month)}"></label>
+   <label>Tipo de movimiento<select data-bank-direction>
+    <option value="">Todos</option>
+    <option value="Gasto" ${filters.direction==='Gasto'?'selected':''}>Cargos</option>
+    <option value="Ingreso" ${filters.direction==='Ingreso'?'selected':''}>Abonos</option>
+   </select></label>
+  </div>
   <div class="metricgrid">${groups.map(([title,items])=>`<div class="card"><small>${title} · ${items.length}</small><strong class="metric">${total(items)}</strong></div>`).join('')}</div>
   ${groups.map(([title,items])=>`<details class="card" ${title==='Conciliados'?'':'open'}><summary>${title} · ${items.length} · ${total(items)}</summary>
    ${items.length?`<div class="scroll"><table><thead><tr><th>Fecha</th><th>Movimiento bancario</th><th>Importe</th><th>Justificante</th></tr></thead><tbody>${items.map(row=>`<tr>
-    <td>${esc(row.date)}</td><td>${esc(row.concept||'Sin concepto')}${row.reference?`<small>${esc(row.reference)}</small>`:''}</td><td>${euros(row.amount)}</td>
+    <td>${esc(row.date)}</td><td>${esc(row.concept||'Sin concepto')}${row.reference?`<small>${esc(row.reference)}</small>`:''}</td><td>${row.direction==='Gasto'?'−':'+'}${euros(row.amount)}</td>
     <td>${row.invoice?`<strong>${esc(invoiceLabel(row.invoice))}</strong><small>${esc(row.state)}</small><div>${links(row.invoice)}</div>`:''}
     ${row.candidates.length?`<label>Factura con el mismo importe<select data-invoice-option="${esc(row.id)}">
       ${row.candidates.length>1?'<option value="">Elige una factura</option>':''}
@@ -682,12 +697,22 @@ async function bankPanel(container){
       <div data-bank-files>${row.candidates.length===1?links(row.candidates[0]):''}</div>
       <button type="button" data-match-bank="${esc(row.id)}">Conciliar</button>`:''}
     ${row.matched?`<button type="button" data-unmatch-bank="${esc(row.id)}">Desvincular</button>`:''}
-    ${!row.invoice&&!row.candidates.length?`<small>${esc(row.state)}</small>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<p>Sin movimientos en este grupo.</p>'}</details>`).join('')}`;
+    ${!row.invoice&&!row.candidates.length?`<small>${esc(row.state)}</small>`:''}</td></tr>`).join('')}</tbody></table></div>`:'<p>Sin movimientos en este grupo.</p>'}</details>`).join('')}
+  <details class="card"><summary>Facturas pendientes de conciliar · ${pendingInvoices.length} · ${total(pendingInvoices)}</summary>
+   ${pendingInvoices.length?`<div class="scroll"><table><thead><tr><th>Factura</th><th>Importe</th><th>Original</th></tr></thead><tbody>
+    ${pendingInvoices.map(invoice=>`<tr><td>${esc(invoiceLabel(invoice))}</td><td>${invoice.direction==='Gasto'?'−':'+'}${euros(invoice.amount)}</td><td>${links(invoice)}</td></tr>`).join('')}
+   </tbody></table></div>`:'<p>Sin facturas pendientes para este filtro.</p>'}
+  </details>`;
+ const month=container.querySelector('[data-bank-month]');
+ const direction=container.querySelector('[data-bank-direction]');
+ const filter=()=>bankPanel(container,{month:month.value,direction:direction.value},data).catch(err=>message(err.message));
+ month.onchange=filter;
+ direction.onchange=filter;
  const save=async(button,movement,invoice)=>{
   button.disabled=true;
   try{
    await api('/bank/reconciliation/'+encodeURIComponent(movement),'POST',{invoice});
-   await bankPanel(container);
+   await bankPanel(container,filters);
    message(invoice?'Movimiento conciliado.':'Enlace retirado.');
   }catch(err){message(err.message);}
   finally{button.disabled=false;}
