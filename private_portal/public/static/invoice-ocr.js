@@ -129,6 +129,81 @@ window.InvoiceOCR=(()=>{
  throw Error('Selecciona una foto JPG/PNG/WEBP o un PDF.');}finally{if(worker){try{await worker.terminate();}catch{}}if(pdf){try{await pdf.destroy();}catch{}}control.worker=null;}}
  return {number,date,parse,read,spatialText};
 })();
+async function scanDocumentWithCamera(){
+ if(!navigator.mediaDevices?.getUserMedia)throw Error('La cámara en directo no está disponible. Adjunta un PDF escaneado desde Contabilidad.');
+ const dialog=document.createElement('dialog');
+ dialog.className='document-scanner';
+ dialog.innerHTML=`<form method="dialog"><h2>Escanear factura</h2>
+ <div class="scanner-viewport"><video autoplay muted playsinline></video><div class="scanner-guide" aria-hidden="true"></div></div>
+ <p role="status">Abriendo cámara…</p>
+ <div class="toolbar"><button value="cancel">Cancelar</button><button type="button" data-capture disabled>Escanear ahora</button></div></form>`;
+ const video=dialog.querySelector('video');
+ const status=dialog.querySelector('[role=status]');
+ const capture=dialog.querySelector('[data-capture]');
+ const sample=document.createElement('canvas');
+ sample.width=32;sample.height=32;
+ const sampler=sample.getContext('2d',{willReadFrequently:true});
+ const inset=0.08;
+ let stream,timer,previous,stable=0,cancelled=false,capturing=false;
+ document.body.appendChild(dialog);
+ try{
+  return await new Promise((resolve,reject)=>{
+   const scan=async()=>{
+    if(capturing||cancelled||!video.videoWidth)return;
+    capturing=true;capture.disabled=true;
+    clearInterval(timer);
+    try{
+     const w=video.videoWidth,h=video.videoHeight;
+     const canvas=document.createElement('canvas');
+     const scale=Math.min(1,2200/Math.max(w,h));
+     canvas.width=Math.round(w*(1-2*inset)*scale);
+     canvas.height=Math.round(h*(1-2*inset)*scale);
+     canvas.getContext('2d').drawImage(video,w*inset,h*inset,w*(1-2*inset),h*(1-2*inset),0,0,canvas.width,canvas.height);
+     const blob=await new Promise(done=>canvas.toBlob(done,'image/jpeg',0.9));
+     if(!blob)throw Error('No se pudo generar el escaneo.');
+     if(!cancelled)resolve(new File([blob],'factura-escaneada.jpg',{type:'image/jpeg'}));
+    }catch(error){reject(error);}
+   };
+   capture.onclick=scan;
+   dialog.addEventListener('close',()=>{cancelled=true;resolve(null);},{once:true});
+   dialog.showModal();
+   (async()=>{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    if(cancelled){stream.getTracks().forEach(track=>track.stop());return;}
+    video.srcObject=stream;
+    await video.play();
+    if(cancelled)return;
+    status.textContent='Coloca la factura dentro del marco y mantén el móvil quieto.';
+    capture.disabled=false;
+    timer=setInterval(()=>{
+     if(video.readyState<2||!video.videoWidth)return;
+     const w=video.videoWidth,h=video.videoHeight;
+     sampler.drawImage(video,w*inset,h*inset,w*(1-2*inset),h*(1-2*inset),0,0,32,32);
+     const pixels=sampler.getImageData(0,0,32,32).data;
+     const luminance=new Uint8Array(1024);
+     let light=0,dark=0,movement=0;
+     for(let i=0;i<1024;i++){
+      const offset=4*i;
+      const value=luminance[i]=(pixels[offset]+pixels[offset+1]+pixels[offset+2])/3;
+      if(value>145)light++;
+      if(value<100)dark++;
+      if(previous)movement+=Math.abs(value-previous[i]);
+     }
+     const readable=light>450&&dark>12;
+     stable=readable&&previous&&movement/1024<4?stable+1:0;
+     previous=luminance;
+     if(stable>=5)scan();
+    },250);
+   })().catch(()=>reject(Error('No se pudo abrir la cámara. Revisa el permiso de cámara o adjunta un PDF escaneado desde Contabilidad.')));
+  });
+ }finally{
+  clearInterval(timer);
+  stream?.getTracks().forEach(track=>track.stop());
+  video.srcObject=null;
+  dialog.remove();
+ }
+}
+
 async function scanInvoiceImage(file){
  const bitmap=await createImageBitmap(file);
  const source=document.createElement('canvas');
@@ -138,11 +213,11 @@ async function scanInvoiceImage(file){
  source.getContext('2d').drawImage(bitmap,0,0,source.width,source.height);
  bitmap.close();
  const dialog=document.createElement('dialog');
- dialog.style.cssText='width:min(92vw,580px);max-height:90vh;overflow:auto;margin:auto;padding:16px';
+ dialog.className='document-scanner';
  const edges=[['top','Superior'],['right','Derecho'],['bottom','Inferior'],['left','Izquierdo']];
  dialog.innerHTML=`<form method="dialog"><h2>Escanear factura</h2>
  <p>Ajusta los bordes si necesitas recortar la factura.</p>
- <canvas aria-label="Vista previa del escaneo" style="display:block;max-width:100%;max-height:40vh;object-fit:contain;margin:auto"></canvas>
+ <canvas aria-label="Vista previa del escaneo"></canvas>
  <details><summary>Recortar bordes</summary><div class="grid">${edges.map(([id,label])=>`<label>${label}<input name="${id}" type="range" min="0" max="45" value="0"></label>`).join('')}</div></details>
  <div class="toolbar"><button type="button" id="scanRotate">Girar 90°</button>
  <label><input type="checkbox" name="contrast"> Mejorar contraste</label></div>
@@ -188,9 +263,8 @@ async function scanInvoiceImage(file){
  }finally{dialog.remove();}
 }
 
-function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');if(!form)return;const box=document.createElement('section');box.className='card invoice-ocr';box.innerHTML='<h2>Subir ticket o factura</h2><div class="toolbar"><button type="button" class="primary" id="takeInvoicePhoto">Escanear con cámara</button><button type="button" id="pickInvoiceFile">Adjuntar factura o foto</button></div><input id="invoiceCamera" type="file" accept="image/*" capture="environment" hidden><input id="invoiceFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden><div class="toolbar"><button type="button" id="readInvoice" class="primary">Leer factura</button><button type="button" id="cancelInvoice" hidden>Cancelar lectura</button></div><p id="invoiceProgress" role="status" aria-live="polite"></p><div id="invoiceDetected"></div><small>La lectura se hace en tu navegador. Al guardar se adjunta el archivo seleccionado. El escaneo se adjunta como JPG. También puedes adjuntar un PDF escaneado. Solo Dirección podrá descargarlo. Máximo 4 MB y 8 páginas por lectura.</small>';document.getElementById('moduleEditor').before(box);let current=null;
- const camera=box.querySelector('#invoiceCamera'),picker=box.querySelector('#invoiceFile');
- box.querySelector('#takeInvoicePhoto').onclick=()=>camera.click();
+function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');if(!form)return;const box=document.createElement('section');box.className='card invoice-ocr';box.innerHTML='<h2>Subir ticket o factura</h2><div class="toolbar"><button type="button" class="primary" id="takeInvoicePhoto">Escanear con cámara</button><button type="button" id="pickInvoiceFile">Adjuntar factura o foto</button></div><input id="invoiceFile" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" hidden><div class="toolbar"><button type="button" id="readInvoice" class="primary">Leer factura</button><button type="button" id="cancelInvoice" hidden>Cancelar lectura</button></div><p id="invoiceProgress" role="status" aria-live="polite"></p><div id="invoiceDetected"></div><small>La lectura se hace en tu navegador. Al guardar se adjunta el archivo seleccionado. El escaneo se adjunta como JPG. También puedes adjuntar un PDF escaneado. Solo Dirección podrá descargarlo. Máximo 4 MB y 8 páginas por lectura.</small>';document.getElementById('moduleEditor').before(box);let current=null;
+ const picker=box.querySelector('#invoiceFile');
  box.querySelector('#pickInvoiceFile').onclick=()=>picker.click();
  let selection=0;
  const chooseOriginal=async (file,fromCamera)=>{
@@ -217,16 +291,19 @@ function addInvoiceOCR(c,ctx){const form=document.getElementById('moduleForm');i
   form.elements.amount.scrollIntoView?.({block:'nearest'});
   if(fromCamera)box.querySelector('#readInvoice').click();
  };
- camera.onchange=picker.onchange=e=>{
+ box.attachScan=file=>chooseOriginal(file,true);
+ box.querySelector('#takeInvoicePhoto').onclick=async e=>{
+  const button=e.currentTarget;
+  button.disabled=true;
+  try{const scan=await scanDocumentWithCamera();if(scan)await box.attachScan(scan);}
+  catch(error){message(error.message);}
+  finally{button.disabled=false;}
+ };
+ picker.onchange=e=>{
   const file=e.target.files[0];
   e.target.value='';
-  if(file)chooseOriginal(file,e.target===camera);
+  if(file)chooseOriginal(file,false);
  };
- if(!ctx.fixedEvent&&quickInvoiceFile){
-  const file=quickInvoiceFile;
-  quickInvoiceFile=null;
-  chooseOriginal(file,true);
- }
  document.getElementById('cancelInvoice').onclick=async()=>{if(current){current.cancelled=true;if(current.worker){try{await current.worker.terminate();}catch{}}document.getElementById('invoiceProgress').textContent='Lectura cancelada.';}};
  document.getElementById('readInvoice').onclick=async()=>{const button=document.getElementById('readInvoice'),cancel=document.getElementById('cancelInvoice'),status=document.getElementById('invoiceProgress'),file=form.invoiceOriginal;if(!file){message('Selecciona una factura o fotografía.');return;}const control={cancelled:false};current=control;button.disabled=true;cancel.hidden=false;message('');try{const result=await InvoiceOCR.read(file,text=>{if(box.isConnected&&!control.cancelled)status.textContent=text;},control);if(control.cancelled||!box.isConnected)return;const fields=InvoiceOCR.parse(result.text);if(!result.text.trim())throw Error('No se ha detectado texto. Prueba una foto más nítida o completa los campos manualmente.');document.getElementById('moduleEditor').hidden=false;
  const mappings=['date','counterparty','reference','taxId','concept','category'];for(const key of mappings){if(fields[key]&&form.elements[key])form.elements[key].value=fields[key];}for(const key of ['amount','baseAmount','taxAmount']){if(Number.isFinite(fields[key])&&fields[key]>=0&&form.elements[key])form.elements[key].value=fields[key].toFixed(2);}form.elements.direction.value='Gasto';form.elements.status.value='Pendiente';const matches=ctx.fixedEvent?[ctx.fixedEvent]:ctx.events.filter(e=>e.date&&fields.date&&fields.date>=e.date&&fields.date<=(e.endDate||e.date)&&e.status!=='Cancelada');if(matches.length===1)form.elements.event.value=matches[0].id;else form.elements.event.value='';form.dataset.ocrReview='true';let review=document.getElementById('invoiceReview');if(!review){review=document.createElement('label');review.id='invoiceReview';review.className='checkline note';review.innerHTML='<input type="checkbox" name="ocrReviewed"> He revisado proveedor, fecha, factura, importes y actividad antes de guardar.';form.querySelector('button[type=submit]').before(review);}form.elements.ocrReviewed.checked=false;

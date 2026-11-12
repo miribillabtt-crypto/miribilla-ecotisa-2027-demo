@@ -10,7 +10,7 @@ function select(label,name,items,current=''){return `<label>${esc(label)}<select
 function bindForm(id,fn){const form=document.getElementById(id);if(!form)return;form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button[type=submit]')||form.querySelector('button');if(button)button.disabled=true;try{message('');await fn(form,Object.fromEntries(new FormData(form)));}catch(err){message(err.message);}finally{if(button)button.disabled=false;}};}
 function login(){app.innerHTML=`<main class="auth"><h1>Entrar al equipo</h1><p>Introduce tu usuario o correo y tu contraseña.</p><form method="post" id="login" class="card">${field('Usuario o correo','email','text')}${field('Contraseña','password','password')}<label class="checkline"><input type="checkbox" name="remember"> Recordarme en este dispositivo durante 30 días</label><button type="submit" class="primary">Entrar</button></form><small>Alta por invitación de Dirección. Si has perdido el acceso, solicita un nuevo enlace al responsable del equipo.</small></main>`;document.querySelector('[name=password]').autocomplete='current-password';document.querySelector('[name=password]').minLength=4;document.querySelector('[name=email]').autocomplete='username';document.querySelector('[name=email]').autocapitalize='none';document.querySelector('[name=email]').spellcheck=false;bindForm('login',async(_,d)=>{await api('/login','POST',d);await init();});}
 async function activation(token){activationToken=token;const data=await api('/activate/start','POST',{token});app.innerHTML=`<main class="auth"><h1>Activar acceso · ${esc(roles[data.role])}</h1><div class="card"><strong>${esc(data.name)}</strong>${data.chooseEmail?'':`<p>${esc(data.email)}</p>`}<form method="post" id="activate">${data.chooseEmail?field('Tu correo electrónico','email','email'):''}${field('Contraseña personal · mínimo 6 caracteres','password','password')}${field('Repetir contraseña','repeat','password')}<button class="primary" type="submit">Activar mi usuario</button></form></div></main>`;bindForm('activate',async(_,d)=>{if(d.password!==d.repeat)throw Error('Las contraseñas no coinciden');await api('/activate/finish','POST',{token:activationToken,password:d.password,email:d.email});activationToken='';login();message('Cuenta activada. Ya puedes entrar con tu correo y contraseña.');});}
-let quickInvoiceFile=null;
+
 function directionSections(){
  return [
   ['Inicio',[['home','Inicio']]],
@@ -35,21 +35,25 @@ function directionSubnav(sections){
  return `<div class="section-navigation"><strong>${title}</strong><div class="section-links" aria-label="Apartados de ${title}">${items.map(([id,label])=>`<button type="button" data-page="${id}" ${page===id?'aria-current="page" class="active"':''}>${label}</button>`).join('')}</div></div>`;
 }
 function shell(){const mobile=window.matchMedia?.('(max-width: 800px)').matches;const sections=me.role==='director'?directionSections():null;let groups=[];if(me.role==='runner')groups=[['Mi área',[['home','Inicio'],['calendar','Calendario del equipo'],['calls','Mis convocatorias'],['planning','Mi planning'],['profile','Mis datos y documentos'],['results','Mis resultados'],['days','Mis días de actividad'],['charges','Mis gastos y recibos'],['myclothes','Mi ropa'],['shop','Tienda'],['fines','Mis multas'],['publications','Mis publicaciones']]]];else if(me.role==='technician')groups=[['Área técnica',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi disponibilidad'],['calls','Convocatorias'],['planning','Planning y medios'],['resources','Técnicos y vehículos'],['vehiclelogs','Gestión de vehículos'],['equipment','Material y medidas'],['results','Resultados'],['days','Días de actividad']]]];else groups=[['Comunicación',[['home','Inicio'],['publications','Generar publicaciones'],['photos','Fotos autorizadas']]]];app.innerHTML=`<div class="portal-layout"><aside><div class="identity"><strong>${esc(me.name)}</strong><small>${esc(roles[me.role])}</small></div><button type="button" id="mobileMenu" aria-expanded="false" aria-controls="portalNavigation">☰ Menú</button><div id="portalNavigation"><nav aria-label="Menú del portal">${sections?directionNavigation(sections):groups.map(([title,items])=>`<details ${!mobile||items.some(([id])=>id===page)?'open':''}><summary>${title}</summary>${items.map(([id,label])=>`<button data-page="${id}" ${page===id?'aria-current="page"':''} class="${page===id?'active':''}">${label}</button>`).join('')}</details>`).join('')}</nav><button id="logout">Cerrar sesión</button></div></aside>
-${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${['director','technician'].includes(me.role)?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button><input type="file" id="mobileInvoiceCamera" accept="image/*" capture="environment" hidden>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
+${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${['director','technician'].includes(me.role)?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
 menu.onclick=()=>{
  const expanded=menu.getAttribute('aria-expanded')==='true';
  menu.setAttribute('aria-expanded',String(!expanded));
  document.getElementById('portalNavigation').classList.toggle('expanded',!expanded);
 };
-const quick=document.getElementById('mobileInvoiceCamera');
-if(quick){
- document.getElementById('mobileInvoice').onclick=()=>quick.click();
- quick.onchange=()=>{
-  if(!quick.files[0])return;
-  quickInvoiceFile=quick.files[0];
-  navigate('conta');
- };
-}
+const quick=document.getElementById('mobileInvoice');
+if(quick)quick.onclick=async()=>{
+ quick.disabled=true;
+ try{
+  const scan=await scanDocumentWithCamera();
+  if(!scan)return;
+  await navigate('conta');
+  const editor=document.querySelector('#content .invoice-ocr');
+  if(editor?.attachScan)await editor.attachScan(scan);
+  else message('No se pudo abrir el editor de facturas.');
+ }catch(error){message(error.message);}
+ finally{quick.disabled=false;}
+};
 document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>navigate(b.dataset.page));window.DemoPortal?.banner();return document.getElementById('content');}
 async function navigate(next){page=(me.role==='director'&&['calls','planning'].includes(next))||(me.role==='runner'&&next==='mine')?'calendar':next;message('');const content=shell();if(window.matchMedia?.('(max-width: 800px)').matches)window.scrollTo(0,0);try{if(page==='home'){await dashboardPage(content);}else if(featureViews[page]){await featureViews[page](content);}else if(page==='users'){await usersPage(content);addBulkUserImport(content);}else if(page==='calendar'||page==='mine')await calendarPage(content);else if(page==='profile')await profilePage(content,me.id);else if(page==='roster')await rosterPage(content);else if(page==='clothes')await clothesPage(content);else if(page==='myclothes')await myClothesPage(content);else if(page==='fines')await finesPage(content);else if(page==='photos')await photosPage(content);else if(page==='audit'){const d=await api('/audit');content.innerHTML='<h1>Registro de accesos y cambios</h1><div class="card scroll"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Referencia</th></tr></thead><tbody>'+d.entries.map(r=>`<tr><td>${esc(new Date(r.at*1000).toLocaleString('es-ES'))}</td><td>${esc(r.action)}</td><td>${esc(r.user||'Acceso no identificado')}</td><td>${esc(r.target)}</td></tr>`).join('')+'</tbody></table></div>';}}catch(e){message(e.message);}}
 function inviteLink(token){return location.origin+'/#activar='+encodeURIComponent(token);}
@@ -97,13 +101,10 @@ function bindNameSearch(input,container){
   input.oninput();
 }
 
-function availabilityChecks(riderId,status){
- const selected=['Disponible','No disponible'].includes(status)?status:'Pendiente de respuesta';
- return `<fieldset><legend>Disponibilidad del corredor</legend>${['Disponible','No disponible','Pendiente de respuesta'].map(value=>`<label class="checkline"><input type="radio" name="response:${esc(riderId)}" disabled ${value===selected?'checked':''}>${value}</label>`).join('')}</fieldset>`;
-}
-function setAllCallStates(form,state){
- if(!['No convocado','Preconvocado','Convocado'].includes(state))throw Error('Estado de convocatoria no válido');
- form.querySelectorAll('select[name^="call:"]').forEach(input=>{input.value=state;});
+function callAvailability(status){
+ if(status==='Disponible')return '<span class="resource-state available">Disponible</span>';
+ if(status==='No disponible')return '<span class="resource-state unavailable">No disponible</span>';
+ return '<span class="resource-state pending">Pendiente de respuesta</span>';
 }
 function riderCallState(event){
  if((event.precalled||[]).includes(me.id))return {label:'Preconvocado',style:'assigned'};
@@ -121,7 +122,7 @@ function riderAvailabilityInput(event){
 function riderCalendar(c,events){
  const sorted=sortActivities(events);
  c.innerHTML=`<h1>Calendario del equipo</h1>
-  <p>Responde Disponible o No disponible en cada carrera y concentración para informar a Dirección. Dirección decide la convocatoria.</p>
+  <p>Indica si estás disponible antes o después de que Dirección publique tu convocatoria o preconvocatoria.</p>
   <p id="riderAvailabilityPending" role="status"></p>
   <details class="card"><summary>Exportar calendario</summary>
    <form method="get" action="/api/calendar.ics" class="toolbar">
@@ -220,49 +221,66 @@ async function calendarPage(c,selectedId){
       <section class="card" id="activityCallPanel">
       <h2>Convocatoria</h2><button type="button" id="refreshCallResponses">Actualizar respuestas de disponibilidad</button>
       <div class="toolbar"><span class="pill" id="activityCallStatus"></span>
-        <button type="button" id="activityPublish"></button>
         <a class="button" href="/api/events/${encodeURIComponent(event.id)}/package">Descargar convocatoria y paquete hotel</a>
       </div>
-      <details class="event-call"><summary id="callSelectionSummary">Abrir corredores para convocar</summary>
-      <form method="post" id="calendarCall"><p>La disponibilidad es informativa: puedes decidir la convocatoria aunque no haya respuesta o figure No disponible.</p><div class="toolbar"><button type="button" data-bulk-call="Convocado">Seleccionar todos · Convocar</button><button type="button" data-bulk-call="Preconvocado">Preconvocar a todos</button><button type="button" data-bulk-call="No convocado">Quitar selección de todos</button></div><small>Puedes ajustar cada corredor después. Pulsa Guardar convocatoria para aplicar los cambios.</small>${riders.map(r=>`<div class="card"><strong>${esc(r.name)}</strong><div data-rider-response="${esc(r.id)}">${availabilityChecks(r.id,responses[r.id])}</div>${select('Convocatoria','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</div>`).join('')||'<p>Aún no hay corredores registrados.</p>'}
-      <button type="submit">Guardar convocatoria</button></form></details>
+      <form method="post" id="calendarCall">
+       <p>Marca los corredores, elige una acción y guarda. La disponibilidad se puede indicar antes o después de convocar.</p>
+       <div class="toolbar" role="group" aria-label="Acciones para corredores marcados">
+        <button type="button" data-bulk-call="Convocado" disabled>Convocar</button>
+        <button type="button" data-bulk-call="Preconvocado" disabled>Preconvocar</button>
+        <button type="button" data-bulk-call="No convocado" disabled>Quitar convocatoria</button>
+       </div>
+       ${riders.length?`<div class="scroll"><table>
+        <thead><tr><th><label class="checkline"><input id="callSelectAll" type="checkbox"> Todos</label></th><th>Corredor</th><th>Disponibilidad</th><th>Convocatoria</th></tr></thead>
+        <tbody>${riders.map(r=>`<tr>
+         <td><input type="checkbox" data-call-rider="${esc(r.id)}" aria-label="Marcar a ${esc(r.name)}"></td>
+         <th scope="row">${esc(r.name)}</th>
+         <td data-rider-response="${esc(r.id)}">${callAvailability(responses[r.id])}</td>
+         <td>${select('Estado','call:'+r.id,['No convocado','Preconvocado','Convocado'],(event.precalled||[]).includes(r.id)?'Preconvocado':called.includes(r.id)?(event.callStatus==='Publicada'?'Convocado':'Preconvocado'):'No convocado')}</td>
+        </tr>`).join('')}</tbody></table></div>`:'<p>Aún no hay corredores registrados.</p>'}
+       <button type="submit" class="primary" ${riders.length?'':'disabled'}>Guardar convocatoria</button>
+      </form>
       </section><section class="card" id="eventTravelPanel" hidden></section><section class="card" id="eventExpensePanel" hidden></section>`:''}`;
     document.getElementById('backCalendar').onclick=()=>navigate(page);
     if(director){
       document.getElementById('editCalendarEvent').onclick=()=>editEvent(c,event);
       c.querySelector('#moveCalendarEvent').onclick=()=>moveCalendarEvent(c,event);
       c.querySelector('#removeCalendarEvent').onclick=()=>removeCalendarEvent(c,event);
-      const publish=c.querySelector('#activityPublish');
       const callForm=c.querySelector('#calendarCall');
       c.querySelector('#refreshCallResponses').onclick=async e=>{
         const button=e.currentTarget;button.disabled=true;
         try{
           const latest=(await api('/events')).events.find(item=>item.id===event.id);
           if(!latest)throw Error('La actividad ya no está disponible');
-          c.querySelectorAll('[data-rider-response]').forEach(node=>{node.innerHTML=availabilityChecks(node.dataset.riderResponse,latest.responses?.[node.dataset.riderResponse]);});
+          c.querySelectorAll('[data-rider-response]').forEach(node=>{node.innerHTML=callAvailability(latest.responses?.[node.dataset.riderResponse]);});
           message('Respuestas de disponibilidad actualizadas.');
         }catch(error){message(error.message);}
         finally{button.disabled=false;}
       };
 
       const selection=()=>Object.fromEntries([...callForm.querySelectorAll('select[name^="call:"]')].map(input=>[input.name.slice(5),input.value]));
-      const initial=JSON.stringify(selection());
+      const checks=[...callForm.querySelectorAll('[data-call-rider]')];
+      const bulk=[...callForm.querySelectorAll('[data-bulk-call]')];
+      const all=callForm.querySelector('#callSelectAll');
       const renderCall=()=>{
-        const states=selection(),values=Object.values(states);
+        const values=Object.values(selection());
+        const marked=checks.filter(input=>input.checked).length;
         c.querySelector('#activityCallStatus').textContent=values.filter(value=>value==='Convocado').length+' convocados · '+values.filter(value=>value==='Preconvocado').length+' preconvocados';
-        c.querySelector('#callSelectionSummary').textContent='Abrir corredores para convocar · '+values.filter(value=>value!=='No convocado').length+' seleccionados';
-        publish.textContent=event.callStatus==='Publicada'?'Pasar todos a preconvocados':'Convocar a todos los preconvocados';
-        publish.disabled=JSON.stringify(states)!==initial||!values.some(value=>value!=='No convocado');
+        if(all){
+         all.checked=marked===checks.length;
+         all.indeterminate=marked>0&&marked<checks.length;
+        }
+        bulk.forEach(button=>{button.disabled=!marked;});
       };
-      renderCall();callForm.onchange=renderCall;
-      callForm.querySelectorAll('[data-bulk-call]').forEach(button=>button.onclick=()=>{setAllCallStates(callForm,button.dataset.bulkCall);renderCall();});
-      publish.onclick=async()=>{
-        const states=selection(),next=event.callStatus==='Publicada'?'Preconvocado':'Convocado';
-        Object.keys(states).forEach(id=>{if(states[id]!=='No convocado')states[id]=next;});
-        publish.disabled=true;
-        try{await api('/events/'+event.id+'/call','POST',{states});await calendarPage(c,event.id);message('Convocatoria actualizada.');}
-        catch(error){message(error.message);renderCall();}
-      };
+      callForm.onchange=renderCall;
+      if(all)all.onchange=()=>{checks.forEach(input=>{input.checked=all.checked;});renderCall();};
+      bulk.forEach(button=>button.onclick=()=>{
+       for(const input of checks){
+        if(input.checked)callForm.elements.namedItem('call:'+input.dataset.callRider).value=button.dataset.bulkCall;
+       }
+       renderCall();
+      });
+      renderCall();
       bindForm('calendarCall',async()=>{
         await api('/events/'+event.id+'/call','POST',{states:selection()});
         await calendarPage(c,event.id);message('Convocatoria guardada.');

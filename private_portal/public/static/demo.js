@@ -52,7 +52,7 @@ window.DemoPortal=(()=>{
    <div class="grid">${Object.entries(roles).map(([value,label])=>`<button type="button" class="tile" data-demo-role="${value}">${label}</button>`).join('')}</div>
    <button type="button" id="exitDemo">Salir de la demo</button></main>`;
   app.querySelectorAll('[data-demo-role]').forEach(button=>button.onclick=async()=>{
-   role=button.dataset.demoRole;sessionStorage.setItem(key,role);quickInvoiceFile=null;calendarMonth='';await init();
+   role=button.dataset.demoRole;sessionStorage.setItem(key,role);calendarMonth='';await init();
   });
   app.querySelector('#exitDemo').onclick=()=>{stop();me=null;login();};
  }

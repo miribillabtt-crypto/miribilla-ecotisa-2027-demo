@@ -156,7 +156,7 @@ def create_app(test_config=None):
         response.headers['Referrer-Policy']='no-referrer'
         response.headers['X-Frame-Options']='DENY'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' blob:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-        response.headers['Permissions-Policy']='camera=(), microphone=(), geolocation=()'
+        response.headers['Permissions-Policy']='camera=(self), microphone=(), geolocation=()'
         if not app.testing:response.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
         if hasattr(g,'db'):
             if response.status_code<400:g.db.commit()
