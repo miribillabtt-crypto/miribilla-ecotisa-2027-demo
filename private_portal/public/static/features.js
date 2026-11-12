@@ -13,7 +13,7 @@ const moduleSpecs={
  license:[['rider','Corredor','runner'],['number','Número de licencia'],['status','Estado',['No aportada','Pendiente de revisión','Verificada','Caducada']],['expiration','Caducidad','date'],['notes','Observaciones','textarea']],
  sport:[['rider','Corredor','runner'],['bike','Bicicleta · marca y modelo'],['bikeSize','Talla bicicleta'],['helmet','Talla casco'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)','integer'],['saddleToBar','Distancia sillín–manillar (mm)','integer'],['coach','Preparador'],['club','Club de procedencia'],['notes','Notas deportivas','textarea']]
 };
-const featureViews={vehiclelogs:vehicleLogsPage,clubsettlement:clubSettlementPage,shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
+const featureViews={whatsapp:whatsAppPage,vehiclelogs:vehicleLogsPage,clubsettlement:clubSettlementPage,shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
 const euros=n=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format((Number(n)||0)/100);
 let moduleContext={};
 async function dashboardPage(c){
@@ -30,6 +30,7 @@ async function dashboardPage(c){
   ['resources','Técnicos y vehículos','Disponibilidad, fichas y accesos técnicos'],
   ['vehiclelogs','Registrar km','Salida, regreso e historial de vehículos'],
   ['conta','Contabilidad','Facturas, cobros por corredor y conciliación'],
+  ['whatsapp','Avisos por WhatsApp','Preparar un aviso para un contacto o grupo'],
  ];
  c.innerHTML=`<h1>Panel de Dirección · ${me.team==='occident'?'Occident':'Netkom'}</h1>
   ${me.team==='occident'&&me.canSwitchTeam?`<section class="card"><h2>Acceso de Alex Toledo</h2><button type="button" id="inviteOccidentAdmin">Generar enlace de activación</button><div id="occidentInviteResult" aria-live="polite"></div></section>`:''}
@@ -779,4 +780,61 @@ async function vehicleLogsPage(c){
    await vehicleLogsPage(c);message('Regreso registrado. Distancia: '+km(Number(data.end)-log.start)+'.');
   });
  }
+}
+
+function whatsAppPage(content){
+ if(!['director','communication'].includes(me.role))return;
+ const team=me.team==='occident'?'Occident':'Netkom';
+ content.innerHTML=`<h1>Avisos por WhatsApp · ${team}</h1>
+ <div class="card">
+  <p>Prepara el mensaje aquí. En WhatsApp podrás elegir un contacto o grupo y pulsar Enviar.</p>
+  <label>Mensaje<textarea id="whatsappMessage" rows="7" maxlength="1000" placeholder="Escribe el aviso para el equipo"></textarea></label>
+  <div class="row">
+   <button type="button" data-whatsapp-template="training">Entrenamiento</button>
+   <button type="button" data-whatsapp-template="call">Convocatoria</button>
+   <button type="button" data-whatsapp-template="reminder">Recordatorio</button>
+  </div>
+  <div class="row">
+   <button type="button" class="primary" id="openWhatsApp" disabled>Abrir WhatsApp</button>
+   <button type="button" id="copyWhatsApp" disabled>Copiar mensaje</button>
+  </div>
+  <p id="whatsappStatus" role="status"></p>
+ </div>`;
+ const input=content.querySelector('#whatsappMessage');
+ const open=content.querySelector('#openWhatsApp');
+ const copy=content.querySelector('#copyWhatsApp');
+ const status=content.querySelector('#whatsappStatus');
+ const templates={
+  training:`*${team} · Entrenamiento*\nDía: \nHora: \nPunto de encuentro: \nIndicaciones: `,
+  call:`*${team} · Convocatoria*\nActividad: \nDía: \nHora y punto de encuentro: \nPor favor, confirma tu disponibilidad en la app.`,
+  reminder:`*${team} · Recordatorio*\n`
+ };
+ function updateButtons(){
+  open.disabled=copy.disabled=!input.value.trim();
+  status.textContent='';
+ }
+ input.addEventListener('input',updateButtons);
+ content.querySelectorAll('[data-whatsapp-template]').forEach(button=>{
+  button.onclick=()=>{
+   if(input.value.trim()&&!confirm('¿Sustituir el mensaje actual por esta plantilla?'))return;
+   input.value=templates[button.dataset.whatsappTemplate];
+   updateButtons();
+   input.focus();
+  };
+ });
+ open.onclick=()=>{
+  const url=new URL('https://wa.me/');
+  url.searchParams.set('text',input.value.trim());
+  window.open(url.href,'_blank','noopener,noreferrer');
+ };
+ copy.onclick=async()=>{
+  try{
+   await navigator.clipboard.writeText(input.value.trim());
+   status.textContent='Mensaje copiado.';
+  }catch{
+   input.focus();
+   input.select();
+   status.textContent='Copia el texto seleccionado.';
+  }
+ };
 }
