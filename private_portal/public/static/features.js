@@ -13,7 +13,7 @@ const moduleSpecs={
  license:[['rider','Corredor','runner'],['number','Número de licencia'],['status','Estado',['No aportada','Pendiente de revisión','Verificada','Caducada']],['expiration','Caducidad','date'],['notes','Observaciones','textarea']],
  sport:[['rider','Corredor','runner'],['bike','Bicicleta · marca y modelo'],['bikeSize','Talla bicicleta'],['helmet','Talla casco'],['pedals','Pedales'],['saddleHeight','Altura sillín (mm)','integer'],['saddleToBar','Distancia sillín–manillar (mm)','integer'],['coach','Preparador'],['club','Club de procedencia'],['notes','Notas deportivas','textarea']]
 };
-const featureViews={whatsapp:whatsAppPage,vehiclelogs:vehicleLogsPage,clubsettlement:clubSettlementPage,shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
+const featureViews={vehicles:c=>resourceMatrix(c,'vehicles'),vehiclefiles:c=>modulePage(c,'vehicle'),whatsapp:whatsAppPage,vehiclelogs:vehicleLogsPage,clubsettlement:clubSettlementPage,shop:shopPage,dashboard:dashboardPage,calls:callsPage,planning:c=>modulePage(c,'travel'),resources:resourcesPage,licenses:c=>modulePage(c,'license'),equipment:equipmentPage,results:c=>modulePage(c,'result'),days:c=>modulePage(c,'days'),conta:c=>modulePage(c,'entry'),budgets:c=>modulePage(c,'budget'),bank:c=>modulePage(c,'bank'),charges:c=>modulePage(c,'charge'),publications:communicationPage,archive:archivePage};
 const euros=n=>new Intl.NumberFormat('es-ES',{style:'currency',currency:'EUR'}).format((Number(n)||0)/100);
 let moduleContext={};
 async function dashboardPage(c){
@@ -27,8 +27,8 @@ async function dashboardPage(c){
  const actions=[
   ['calendar','Calendario','Carreras, convocatorias, viajes y gastos por actividad'],
   ['roster','Equipo','Corredores, fichas, licencias y ropa'],
-  ['resources','Técnicos y vehículos','Disponibilidad, fichas y accesos técnicos'],
-  ['vehiclelogs','Registrar km','Salida, regreso e historial de vehículos'],
+  ['resources','Técnicos','Disponibilidad, fichas y accesos técnicos'],
+  ['vehicles','Vehículos','Reservas, fichas y kilómetros'],
   ['conta','Contabilidad','Facturas, cobros por corredor y conciliación'],
   ['whatsapp','Avisos por WhatsApp','Preparar un aviso para un contacto o grupo'],
  ];
@@ -214,7 +214,7 @@ table();if(kind==='entry')c.querySelector('#entryClubTotals').onclick=event=>{if
  if(event&&editing){try{await redraw();}catch(err){message(err.message);return;}}
  document.getElementById('moduleEditor').hidden=false;
 };document.getElementById('cancelEdit').onclick=()=>redraw().catch(e=>message(e.message));bindForm('moduleForm',async(f,data)=>{if(f.dataset.ocrReview==='true'&&!f.elements.ocrReviewed?.checked)throw Error('Revisa los datos detectados y marca la confirmación antes de guardar.');const out={};for(const [key,,type] of spec){if(type==='money'){const v=Number(data[key]);if(!Number.isFinite(v)||v<0)throw Error('Importe no válido');out[key]=Math.round(v*100);}else if(type==='integer')out[key]=Number(data[key]);else if(String(type).endsWith('[]'))out[key]=new FormData(f).getAll(key);else out[key]=data[key]||'';}if(event){out.event=event.id;out.direction='Gasto';}
-if(kind==='entry'&&out.amount<=0)throw Error('Introduce un importe mayor que cero.');const savedId=editing||f.dataset.invoiceSavedId||'';const saved=await api('/modules/'+kind+(savedId?'/'+savedId:''),'POST',out);if(kind==='entry'&&f.invoiceOriginal){const id=savedId||saved.id;f.dataset.invoiceSavedId=id;const upload=new FormData();upload.append('file',f.invoiceOriginal);try{await api('/invoices/'+id,'POST',upload,f);}catch(error){throw Error('El apunte ya está guardado, pero no el original: '+error.message+'. Puedes volver a pulsar Guardar para adjuntarlo sin duplicar el gasto.');}}await redraw();message(kind==='entry'&&f.invoiceOriginal?'Apunte y original guardados.':'Registro guardado.');});}if(kind==='entry'&&canEdit)addInvoiceOCR(c,ctx);if(kind==='bank'&&canEdit){document.getElementById('bankcsv').onchange=bankPreview;await bankPanel(c.querySelector('#bankReconciliation'));}if(kind==='vehicle')await vehicleAvailability(c,rows,ctx.events);}
+if(kind==='entry'&&out.amount<=0)throw Error('Introduce un importe mayor que cero.');const savedId=editing||f.dataset.invoiceSavedId||'';const saved=await api('/modules/'+kind+(savedId?'/'+savedId:''),'POST',out);if(kind==='entry'&&f.invoiceOriginal){const id=savedId||saved.id;f.dataset.invoiceSavedId=id;const upload=new FormData();upload.append('file',f.invoiceOriginal);try{await api('/invoices/'+id,'POST',upload,f);}catch(error){throw Error('El apunte ya está guardado, pero no el original: '+error.message+'. Puedes volver a pulsar Guardar para adjuntarlo sin duplicar el gasto.');}}await redraw();message(kind==='entry'&&f.invoiceOriginal?'Apunte y original guardados.':'Registro guardado.');});}if(kind==='entry'&&canEdit)addInvoiceOCR(c,ctx);if(kind==='bank'&&canEdit){document.getElementById('bankcsv').onchange=bankPreview;await bankPanel(c.querySelector('#bankReconciliation'));}}
 function accountSummaryPanel(data){
  const fields=[['clothes','Ropa'],['races','Gastos de carreras'],['fines','Multas']];
  if(data.totals.other)fields.push(['other','Otros']);
@@ -341,22 +341,46 @@ async function eventTravelPanel(panel,event){
   await refreshHotelGuests(guests,event.id);
 }
 
-async function vehicleAvailability(container,vehicles,events,bookings){
-  bookings=bookings??(await api('/resource-availability')).vehicleBookings;
+function vehicleAvailability(container,vehicles,events,bookings){
   const section=document.createElement('section');
   section.className='card';
   section.innerHTML=`<details open><summary>Reservas de vehículos · Netkom y Occident</summary>
     <label>Consultar día<input type="date" id="vehicleDay" value="${esc(vehicleBookingDay||calendarDateKey(new Date()))}"></label>
-    <div id="vehicleBookings"></div><div id="vehicleBookingDates"></div></details>`;
+    <div id="vehicleBookings"></div><div id="vehicleBookingDates"></div></details>
+    ${me.role==='director'&&vehicles.length?`<details><summary>Reservar sin actividad</summary>
+     <form id="standaloneVehicleBooking">
+      <div class="grid">
+       ${select('Vehículo','vehicle',[['','Selecciona un vehículo'],...vehicles.map(vehicle=>[vehicle.id,vehicle.name])])}
+       <label>Desde<input name="date" type="date" required></label>
+       <label>Hasta (opcional)<input name="endDate" type="date"></label>
+       <label>Motivo (opcional)<input name="reason" maxlength="250"></label>
+      </div>
+      <button type="submit" class="primary">Guardar reserva</button>
+     </form></details>`:''}`;
   container.prepend(section);
   const day=section.querySelector('#vehicleDay');
+  const form=section.querySelector('#standaloneVehicleBooking');
+  if(form){
+   const start=form.elements.date,end=form.elements.endDate;
+   form.elements.vehicle.required=true;
+   const syncDate=()=>{start.value=day.value;end.min=start.value;};
+   syncDate();
+   start.onchange=()=>{end.min=start.value;};
+   day.addEventListener('change',syncDate);
+   bindForm(form.id,async(_,data)=>{
+    await api('/vehicle-reservations','POST',data);
+    vehicleBookingDay=data.date;
+    await navigate('vehicles');
+    message('Vehículo reservado.');
+   });
+  }
   const activeIds=new Set(vehicles.map(vehicle=>vehicle.id));
   const future=bookings.filter(row=>row.endDate>=calendarDateKey(new Date())&&row.vehicles.some(id=>activeIds.has(id)));
   const upcoming=[...new Set(future.map(row=>row.date))].sort();
   section.querySelector('#vehicleBookingDates').innerHTML=upcoming.length?`<label>Ir a una fecha con reservas
     <select><option value="">Seleccionar fecha</option>${upcoming.map(date=>`<option>${esc(date)}</option>`).join('')}</select></label>`:'';
   const dates=section.querySelector('#vehicleBookingDates select');
-  if(dates)dates.onchange=()=>{if(dates.value){day.value=dates.value;redraw();}};
+  if(dates)dates.onchange=()=>{if(dates.value){day.value=dates.value;day.dispatchEvent(new Event('change'));}};
   const redraw=()=>{
     vehicleBookingDay=day.value;
     const output=section.querySelector('#vehicleBookings');
@@ -368,14 +392,26 @@ async function vehicleAvailability(container,vehicles,events,bookings){
         const activity=events.find(event=>event.id===row.event);
         return activity?team+' · '+activity.name:team;
       }))];
-      return `<div class="row"><strong>${esc(vehicle.name)}</strong><span class="resource-state ${labels.length?'assigned':'available'}">${labels.length?'Reservado · '+labels.map(esc).join(', '):'Libre'}</span></div>`;
+      const direct=matching.filter(row=>row.direct&&row.id&&me.role==='director').map(row=>
+        `<div class="row"><small>${esc(row.reason||'Reserva sin actividad')}</small><button type="button" data-cancel-reservation="${esc(row.id)}">Cancelar reserva</button></div>`
+      ).join('');
+      return `<div class="row"><strong>${esc(vehicle.name)}</strong><span class="resource-state ${labels.length?'assigned':'available'}">${labels.length?'Reservado · '+labels.map(esc).join(', '):'Libre'}</span>${direct}</div>`;
     }).join('')||'<p>No hay vehículos registrados.</p>';
+    output.querySelectorAll('[data-cancel-reservation]').forEach(button=>button.onclick=async()=>{
+     if(!confirm('¿Cancelar esta reserva del vehículo?'))return;
+     button.disabled=true;
+     try{
+      await api('/vehicle-reservations/'+encodeURIComponent(button.dataset.cancelReservation),'DELETE');
+      await navigate('vehicles');
+      message('Reserva cancelada.');
+     }catch(error){message(error.message);button.disabled=false;}
+    });
   };
   day.onchange=redraw;
   redraw();
 }
 let vehicleBookingDay='';
-let resourceSection='';
+
 
 function clothingCatalog(){
  return `<details class="card clothing-catalog"><summary>Ver diseños de la ropa · Júnior 2027</summary>
@@ -450,27 +486,7 @@ async function shopPage(c){
   finally{button.disabled=false;}
  });
 }
-async function resourcesPage(c){
- const director=me.role==='director';
- c.innerHTML=`<h1>Técnicos y vehículos</h1><div class="toolbar">
-  ${director?'':'<button type="button" id="availabilityTab">Disponibilidad y convocatorias</button>'}
-  <button type="button" id="stafftab">Personal técnico</button><button type="button" id="vehicletab">Vehículos</button><button type="button" class="primary" id="resourceVehicleKm">Registrar km</button>
- </div><div id="resourcescontent"></div>`;
- c.querySelector('#resourceVehicleKm').onclick=()=>navigate('vehiclelogs');
- const content=c.querySelector('#resourcescontent');
- const availability=c.querySelector('#availabilityTab');
- const show=async kind=>{
-  availability?.classList.toggle('active',kind==='all');
-  c.querySelector('#stafftab').classList.toggle('active',kind==='staff');
-  c.querySelector('#vehicletab').classList.toggle('active',kind==='vehicles');
-  resourceSection=kind;
-  await resourceMatrix(content,kind);
- };
- if(availability)availability.onclick=()=>show('all').catch(err=>message(err.message));
- c.querySelector('#stafftab').onclick=()=>show('staff').catch(err=>message(err.message));
- c.querySelector('#vehicletab').onclick=()=>show('vehicles').catch(err=>message(err.message));
- await show(resourceSection||(director?'staff':'all'));
-}
+async function resourcesPage(c){await resourceMatrix(c,'staff');}
 
 async function resourceMatrix(c,section){
  const [calendar,staff,vehicles,travel,overrides]=await Promise.all([
@@ -490,7 +506,7 @@ async function resourceMatrix(c,section){
   if(kind==='vehicles'){
    const reserved=vehicleBookings.filter(row=>row.vehicles.includes(resource.id)&&overlap(event,row));
    const other=reserved.find(row=>row.team!==me.team||row.event!==event.id);
-   if(other)return {label:'Reservado',style:'assigned',fixed:true,note:other.team!==me.team?(other.team==='occident'?'Occident':'Netkom'):events.find(item=>item.id===other.event)?.name};
+   if(other)return {label:'Reservado',style:'assigned',fixed:true,note:other.team!==me.team?(other.team==='occident'?'Occident':'Netkom'):events.find(item=>item.id===other.event)?.name||(other.direct?'Reserva sin actividad':'')};
    const assigned=(assignments.get(event.id)?.vehicles||[]).includes(resource.id);
    const manual=statusRows.some(row=>row.event===event.id&&row.resource===resource.id&&['Reservado','No disponible'].includes(row.status));
    return assigned||manual?{label:'Reservado',style:'assigned',fixed:assigned}:{label:'Libre',style:'available',fixed:!event.date};
@@ -607,7 +623,7 @@ async function resourceMatrix(c,section){
  search.oninput=render;month.onchange=render;
  c.querySelector('#resourceClear').onclick=()=>{search.value='';month.value='';render();};
  render();
- if(section!=='staff')await vehicleAvailability(c,resources.vehicles,events,vehicleBookings);
+ if(section==='vehicles')vehicleAvailability(c,resources.vehicles,events,vehicleBookings);
 }
 async function callsPage(c){
  const [events,riders]=await Promise.all([api('/events'),api('/roster')]);
@@ -766,7 +782,7 @@ async function vehicleLogsPage(c){
  const deleteButton=log=>me.role==='director'||log.user===me.id
   ? `<button type="button" data-delete-vehicle-log="${esc(log.id)}">Borrar registro</button>` : '';
  const options=[['','Selecciona un vehículo'],...vehicles.filter(v=>!open.some(log=>log.vehicle===v.id)).map(v=>[v.id,v.name])];
- c.innerHTML=`<h1>Gestión de vehículos</h1>
+ c.innerHTML=`<h1>Kilómetros e historial de vehículos</h1>
  <form id="vehicleDeparture" class="card"><h2>Registrar salida</h2><div class="grid">
  ${select('Vehículo','vehicle',options)}
  <label>Km de salida<input type="number" name="start" min="0" max="9999999" step="1" inputmode="numeric" required></label>

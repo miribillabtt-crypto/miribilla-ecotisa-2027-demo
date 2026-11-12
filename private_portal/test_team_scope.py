@@ -96,3 +96,44 @@ def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):
     assert post('team',{'team':'occident'}).status_code==200
     assert client.get('/api/resource-availability').json['vehicleBookings']==[
         {'team':'netkom','event':None,'date':'2027-03-03','endDate':'2027-03-03','vehicles':[vehicle]}]
+
+def test_vehicle_reservation_without_activity_blocks_both_teams(env):
+    app,_,login,_=env
+    with app.extensions['db_sessions'].begin() as db:
+        db.add(User(id='shared-direction',email='direccion',name='Dirección',role='director',
+                    documents=True,password=generate_password_hash('a-password-for-testing'),
+                    profile=app.extensions['cipher'].encrypt(b'{}')))
+    client=app.test_client()
+    assert client.post('/api/login',json={'email':'direccion','password':'a-password-for-testing'}).status_code==200
+
+    def change(method,path,data=None):
+        return client.open('/api/'+path,method=method,json=data,
+                           headers={'X-CSRF-Token':client.get('/api/me').json['csrf']})
+
+    assert change('POST','team',{'team':'occident'}).status_code==200
+    vehicle=change('POST','modules/vehicle',{'name':'Furgo'}).json['id']
+    draft={'vehicle':vehicle,'date':'2027-05-01','endDate':'2027-05-02','reason':'Taller'}
+    assert change('POST','vehicle-reservations',dict(draft,endDate='2027-04-30')).status_code==400
+    created=change('POST','vehicle-reservations',draft)
+    assert created.status_code==201
+    path='vehicle-reservations/'+created.json['id']
+    own=client.get('/api/resource-availability').json['vehicleBookings'][0]
+    assert own['id']==created.json['id'] and own['reason']=='Taller'
+    assert change('POST','team',{'team':'netkom'}).status_code==200
+    shared=client.get('/api/resource-availability').json['vehicleBookings']
+    assert shared==[{'team':'occident','event':None,'date':'2027-05-01','endDate':'2027-05-02',
+                    'vehicles':[vehicle],'direct':True}]
+    assert change('DELETE',path).status_code==404
+    assert change('POST','vehicle-reservations',dict(draft,date='2027-05-02')).status_code==409
+    assert change('POST','events',{'name':'Carrera','date':'2027-05-02'}).status_code==200
+    event=client.get('/api/events').json['events'][0]['id']
+    trip={'event':event,'vehicles':[vehicle]}
+    assert change('POST','modules/travel',trip).status_code==409
+    technician,h=login('technician')
+    assert technician.post('/api/vehicle-reservations',json=draft,headers=h).status_code==403
+    assert change('POST','team',{'team':'occident'}).status_code==200
+    assert change('DELETE',path).status_code==200
+    assert change('POST','team',{'team':'netkom'}).status_code==200
+    assert change('POST','modules/travel',trip).status_code==200
+    assert change('POST','vehicle-reservations',draft).status_code==409
+    assert change('POST','vehicle-reservations',dict(draft,date='2027-05-03',endDate='')).status_code==201

@@ -1,7 +1,8 @@
 """Availability overrides for a technical resource and one team activity."""
 import hashlib
+from datetime import date
 from flask import g, jsonify, abort
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 
 def availability_key(event, resource):
@@ -9,13 +10,19 @@ def availability_key(event, resource):
 
 
 VEHICLE_RESERVED = ('Reservado', 'No disponible')
+VEHICLE_BOOKING = 'system:vehicle-reservation'
+
+
+def lock_vehicle_bookings(db):
+    if db.get_bind().dialect.name=='postgresql':
+        db.execute(text('SELECT pg_advisory_xact_lock(20273001)'))
 
 
 def resource_bookings(db, Record, unseal):
     # Read only projected rows so other-team records never enter the identity map.
     rows = db.execute(
         select(Record.kind, Record.id, Record.team, Record.data)
-        .where(Record.kind.in_(('event', 'module:travel', 'system:resource-availability')))
+        .where(Record.kind.in_(('event', 'module:travel', 'system:resource-availability', VEHICLE_BOOKING)))
         .execution_options(shared_resource_lookup=True)
     ).all()
     dates = {}
@@ -30,6 +37,11 @@ def resource_bookings(db, Record, unseal):
         if row.kind == 'event':
             continue
         data = unseal(row.data)
+        if row.kind == VEHICLE_BOOKING:
+            bookings.append(dict(team=row.team, event=None, date=data['date'], endDate=data['endDate'],
+                                 vehicles=[data['vehicle']], staff=[], manual=True, reservation=row.id,
+                                 reason=data.get('reason','')))
+            continue
         event = data.get('event')
         if (row.team, event) not in dates:
             continue
@@ -51,7 +63,7 @@ def check_manual_vehicle_booking(bookings, team, event, activity, vehicle):
     if not start:abort(400, 'Indica la fecha de la actividad antes de reservar el vehículo')
     end = max(start, activity.get('endDate') or start)
     for booking in bookings:
-        if booking['team']==team and booking['event']==event:continue
+        if event and booking['team']==team and booking['event']==event:continue
         if vehicle in booking['vehicles'] and start<=booking['endDate'] and booking['date']<=end:
             abort(409, 'El vehículo ya está reservado para esas fechas')
 
@@ -79,11 +91,53 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         for booking in bookings:
             ids = [resource for resource in booking['vehicles'] if resource in vehicle_ids]
             if ids:
-                vehicles.append(dict(team=booking['team'], date=booking['date'], endDate=booking['endDate'],
-                                     vehicles=ids, event=booking['event'] if booking['team']==g.team else None))
+                same_team=booking['team']==g.team
+                entry=dict(team=booking['team'], date=booking['date'], endDate=booking['endDate'],
+                           vehicles=ids, event=booking['event'] if same_team else None)
+                if 'reservation' in booking:
+                    entry['direct']=True
+                    if same_team:
+                        entry.update(id=booking['reservation'],reason=booking['reason'])
+                vehicles.append(entry)
         shared = [dict(date=row['date'], endDate=row['endDate'], resources=row['staff'])
                   for row in bookings if row['team']!=g.team and row['staff']]
         return jsonify(records=records, shared=shared, vehicleBookings=vehicles)
+
+    @app.post('/api/vehicle-reservations')
+    @require('director')
+    def reserve_vehicle():
+        data=body()
+        vehicle=data.get('vehicle')
+        start=data.get('date')
+        end=data.get('endDate') or start
+        reason=data.get('reason','')
+        if not isinstance(vehicle,str) or not isinstance(reason,str) or len(reason)>250:
+            abort(400,'Revisa el vehículo y el motivo')
+        try:
+            if date.fromisoformat(start).isoformat()!=start or date.fromisoformat(end).isoformat()!=end or end<start:
+                raise ValueError()
+        except (TypeError, ValueError):
+            abort(400,'Indica una fecha de inicio y una fecha de fin válida')
+        lock_vehicle_bookings(g.db)
+        resource=g.db.get(Record,vehicle,with_for_update=True)
+        if not resource or resource.kind!='module:vehicle':abort(404,'Vehículo no disponible')
+        reservation=dict(vehicle=vehicle,date=start,endDate=end,reason=reason.strip())
+        check_manual_vehicle_booking(resource_bookings(g.db,Record,unseal),g.team,None,reservation,vehicle)
+        row=Record(kind=VEHICLE_BOOKING,owner_id=g.user.id,data=seal(reservation))
+        g.db.add(row)
+        g.db.flush()
+        audit('vehicle_reserved',row.id)
+        return jsonify(id=row.id),201
+
+    @app.delete('/api/vehicle-reservations/<reservation_id>')
+    @require('director')
+    def cancel_vehicle_reservation(reservation_id):
+        lock_vehicle_bookings(g.db)
+        row=g.db.get(Record,reservation_id,with_for_update=True)
+        if not row or row.kind!=VEHICLE_BOOKING:abort(404)
+        g.db.delete(row)
+        audit('vehicle_reservation_cancelled',row.id)
+        return jsonify(ok=True)
 
     @app.post('/api/resource-availability')
     @require('director')
@@ -92,9 +146,7 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         event_id,resource_id,status=data.get('event'),data.get('resource'),data.get('status')
         if not isinstance(event_id,str) or not isinstance(resource_id,str):
             abort(400)
-        if g.db.get_bind().dialect.name=='postgresql':
-            from sqlalchemy import text
-            g.db.execute(text('SELECT pg_advisory_xact_lock(20273001)'))
+        lock_vehicle_bookings(g.db)
         event=g.db.get(Record,event_id,with_for_update=True)
         resource=g.db.get(Record,resource_id)
         if not event or event.kind!='event' or not resource or resource.kind not in ('module:staff','module:vehicle'):
