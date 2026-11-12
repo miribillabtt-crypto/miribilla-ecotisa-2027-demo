@@ -152,7 +152,7 @@ function seedTasks(){return [
   {id:uid(),title:'Preparar el material de la semana siguiente',notes:'',coach:'',kind:'weekly',days:[4],date:'',done:false,doneDates:[]}]}
 if(!S||!S.groups){
   S=seed();
-  if({{ organization_occident|default(false)|tojson }}){
+  if({{ organization_empty|default(false)|tojson }}){
     S.coaches=[];S.slots=[];S.sessions=[];S.tasks=[];S.routinesV1=true;
     S.groups.forEach(group=>{group.coord='';});
   }

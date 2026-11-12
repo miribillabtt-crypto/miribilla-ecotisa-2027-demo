@@ -138,3 +138,38 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
     assert change('POST','modules/travel',trip).status_code==200
     assert change('POST','vehicle-reservations',draft).status_code==409
     assert change('POST','vehicle-reservations',dict(draft,date='2027-05-03',endDate='')).status_code==201
+
+def test_school_and_surne_start_separate_and_share_fleet(env):
+    app,_,login,_=env
+    with app.extensions['db_sessions'].begin() as db:
+        db.add(User(id='shared-direction',email='direccion',name='Dirección',role='director',
+                    documents=True,password=generate_password_hash('a-password-for-testing'),
+                    profile=app.extensions['cipher'].encrypt(b'{}')))
+    client=app.test_client()
+    assert client.post('/api/login',json={'email':'direccion','password':'a-password-for-testing'}).status_code==200
+    assert set(client.get('/api/me').json['teams'])=={'netkom','occident','escuela','surne'}
+
+    def post(path,data):
+        return client.post('/api/'+path,json=data,headers={'X-CSRF-Token':client.get('/api/me').json['csrf']})
+
+    vehicle=post('modules/vehicle',{'name':'Furgo'}).json['id']
+    draft={'vehicle':vehicle,'date':'2027-07-01','usage':'trabajo'}
+    assert post('team',{'team':'escuela'}).status_code==200
+    assert client.get('/api/me').json['team']=='escuela'
+    assert client.get('/api/events').json['events']==[]
+    assert client.get('/api/roster').json['riders']==[]
+    rider=post('roster',{'firstName':'Deportista','surname':'Escuela'}).json['rider']['id']
+    assert post('profile/'+rider,{'category':'Infantil'}).status_code==200
+    assert client.get('/api/roster').json['riders'][0]['category']=='Infantil'
+    assert post('events',{'name':'Actividad de Escuela','date':draft['date']}).status_code==200
+    assert post('vehicle-reservations',draft).status_code==201
+
+    for team in ['surne','occident','netkom']:
+        assert post('team',{'team':team}).status_code==200
+        assert client.get('/api/me').json['team']==team
+        assert client.get('/api/events').json['events']==[]
+        assert client.get('/api/profile/'+rider).status_code==404
+        assert client.get('/api/resource-availability').json['vehicleBookings'][0]['team']=='escuela'
+        assert post('vehicle-reservations',draft).status_code==409
+    director,h=login('director')
+    assert director.post('/api/team',json={'team':'surne'},headers=h).status_code==403

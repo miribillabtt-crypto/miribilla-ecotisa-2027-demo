@@ -4,6 +4,8 @@ from sqlalchemy.orm import with_loader_criteria
 
 NETKOM = 'netkom'
 OCCIDENT = 'occident'
+TEAMS = {NETKOM: 'Netkom', OCCIDENT: 'Occident', 'escuela': 'Escuela', 'surne': 'Surne'}
+NEW_TEAMS = ('escuela', 'surne')
 SHARED_RECORDS = (
     'module:staff', 'module:vehicle', 'archived:staff', 'archived:vehicle',
     'system:vehicle-log', 'shared:space-reservation',
@@ -37,3 +39,7 @@ def configure_team_scope(sessions, models, record_model):
         for row in session.new:
             if isinstance(row, (*models, record_model)) and row.team is None:
                 row.team = team
+
+
+def team_record_key(team, key):
+    return key if team == NETKOM else f'{team}:{key}'

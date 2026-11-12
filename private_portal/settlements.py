@@ -2,6 +2,7 @@
 import json
 import os
 import re
+from team_scope import team_record_key
 from hashlib import sha256
 from urllib.request import Request, urlopen
 from flask import abort, g, jsonify
@@ -78,7 +79,7 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
         return jsonify(total=total, riders=len(riders))
 
     def shop_key():
-        return 'occident:clothing-shop' if g.team=='occident' else 'clothing-shop'
+        return team_record_key(g.team,'clothing-shop')
 
     def shop_settings():
         config = g.db.get(Record, shop_key())

@@ -99,7 +99,7 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
                     if same_team:
                         entry.update(id=booking['reservation'],reason=booking['reason'])
                 vehicles.append(entry)
-        shared = [dict(date=row['date'], endDate=row['endDate'], resources=row['staff'])
+        shared = [dict(team=row['team'], date=row['date'], endDate=row['endDate'], resources=row['staff'])
                   for row in bookings if row['team']!=g.team and row['staff']]
         return jsonify(records=records, shared=shared, vehicleBookings=vehicles)
 

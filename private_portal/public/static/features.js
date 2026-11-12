@@ -32,7 +32,7 @@ async function dashboardPage(c){
   ['conta','Contabilidad','Facturas, cobros por corredor y conciliación'],
   ['whatsapp','Avisos por WhatsApp','Preparar un aviso para un contacto o grupo'],
  ];
- c.innerHTML=`<h1>Panel de Dirección · ${me.team==='occident'?'Occident':'Netkom'}</h1>
+ c.innerHTML=`<h1>Panel de Dirección · ${teamName(me.team)}</h1>
   ${me.team==='occident'&&me.canSwitchTeam?`<section class="card"><h2>Acceso de Alex Toledo</h2><button type="button" id="inviteOccidentAdmin">Generar enlace de activación</button><div id="occidentInviteResult" aria-live="polite"></div></section>`:''}
   <div class="grid direction-actions">${actions.map(([id,title,desc])=>`<button type="button" class="tile" data-shortcut="${id}"><strong>${title}</strong><small>${desc}</small></button>`).join('')}</div>
   <h2>Resumen del equipo</h2><div class="metricgrid">${[[s.riders,'Corredores activos'],[s.events,'Actividades'],[s.staff,'Técnicos'],[s.vehicles,'Vehículos'],[euros(s.income),'Ingresos registrados'],[euros(s.expenses),'Gastos registrados']].map(([v,label])=>`<div class="card"><small>${label}</small><strong class="metric">${v}</strong></div>`).join('')}</div>`;
@@ -208,7 +208,7 @@ c.querySelectorAll('[data-split-expense]').forEach(button=>button.onclick=async(
 });
 c.querySelectorAll('[data-edit]').forEach(b=>{
  b.onclick=()=>redraw(b.dataset.edit).catch(e=>message(e.message));
- if(kind==='staff'&&me.team!=='occident')bindStaffPassword(b,rows.find(row=>row.id===b.dataset.edit),issuedStaff);
+ if(kind==='staff'&&me.team==='netkom')bindStaffPassword(b,rows.find(row=>row.id===b.dataset.edit),issuedStaff);
 });c.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Archivar este registro? Se puede restaurar desde Archivados.'))return;try{await api('/modules/'+kind+'/'+b.dataset.archive+'/archive','POST',{});await redraw();}catch(e){message(e.message);}});}
 table();if(kind==='entry')c.querySelector('#entryClubTotals').onclick=event=>{if(event.target.id==='openClubSettlement')navigate('clubsettlement');};if(event)c.refreshActivitySection=table;document.getElementById('moduleSearch').oninput=table;if(kind==='entry')c.querySelector('#entryClubFilter').onchange=table;if(document.getElementById('licenseStatus'))document.getElementById('licenseStatus').onchange=table;if(canEdit){document.getElementById('openNew').onclick=async()=>{
  if(event&&editing){try{await redraw();}catch(err){message(err.message);return;}}
@@ -347,7 +347,7 @@ function vehicleUsage(booking){
 function vehicleAvailability(container,vehicles,events,bookings){
   const section=document.createElement('section');
   section.className='card';
-  section.innerHTML=`<details open><summary>Reservas de vehículos · Netkom y Occident</summary>
+  section.innerHTML=`<details open><summary>Reservas compartidas de vehículos</summary>
     <label>Consultar día<input type="date" id="vehicleDay" value="${esc(vehicleBookingDay||calendarDateKey(new Date()))}"></label>
     <div id="vehicleBookings"></div><div id="vehicleBookingDates"></div></details>
     ${me.role==='director'&&vehicles.length?`<details><summary>Reservar sin actividad</summary>
@@ -392,7 +392,7 @@ function vehicleAvailability(container,vehicles,events,bookings){
     output.innerHTML=vehicles.map(vehicle=>{
       const matching=bookings.filter(row=>row.vehicles.includes(vehicle.id)&&row.date<=day.value&&row.endDate>=day.value);
       const labels=[...new Set(matching.map(row=>{
-        const team=row.team==='occident'?'Occident':'Netkom';
+        const team=teamName(row.team);
         const activity=events.find(event=>event.id===row.event);
         return activity?team+' · '+activity.name:row.direct?team+' · '+vehicleUsage(row):team;
       }))];
@@ -510,7 +510,7 @@ async function resourceMatrix(c,section){
   if(kind==='vehicles'){
    const reserved=vehicleBookings.filter(row=>row.vehicles.includes(resource.id)&&overlap(event,row));
    const other=reserved.find(row=>row.team!==me.team||row.event!==event.id);
-   if(other)return {label:'Reservado',style:'assigned',fixed:true,note:other.team!==me.team?(other.team==='occident'?'Occident':'Netkom'):events.find(item=>item.id===other.event)?.name||(other.direct?'Reserva sin actividad':'')};
+   if(other)return {label:'Reservado',style:'assigned',fixed:true,note:other.team!==me.team?teamName(other.team):events.find(item=>item.id===other.event)?.name||(other.direct?'Reserva sin actividad':'')};
    const assigned=(assignments.get(event.id)?.vehicles||[]).includes(resource.id);
    const manual=statusRows.some(row=>row.event===event.id&&row.resource===resource.id&&['Reservado','No disponible'].includes(row.status));
    return assigned||manual?{label:'Reservado',style:'assigned',fixed:assigned}:{label:'Libre',style:'available',fixed:!event.date};
@@ -521,15 +521,16 @@ async function resourceMatrix(c,section){
   const other=events.find(candidate=>candidate.id!==event.id&&overlap(event,candidate)&&
    (assignments.get(candidate.id)?.[kind]||[]).includes(resource.id));
   if(other)return {label:'No disponible',style:'unavailable',fixed:true,note:other.name};
-  if((overrides.shared||[]).some(booking=>booking.resources.includes(resource.id)&&overlap(event,booking))){
-   return {label:'No disponible',style:'unavailable',fixed:true,note:me.team==='occident'?'Netkom':'Occident'};
+  const shared=(overrides.shared||[]).find(booking=>booking.resources.includes(resource.id)&&overlap(event,booking));
+  if(shared){
+   return {label:'No disponible',style:'unavailable',fixed:true,note:teamName(shared.team)};
   }
   const manual=statusRows.find(row=>row.event===event.id&&row.resource===resource.id);
   const label=manual?.status||event.responses?.[resource.user]||'Por confirmar';
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
  c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
-  ${section==='staff'&&me.role==='director'&&me.team!=='occident'?`<details class="card"><summary>Altas y contraseñas de técnicos</summary>
+  ${section==='staff'&&me.role==='director'&&me.team==='netkom'?`<details class="card"><summary>Altas y contraseñas de técnicos</summary>
    <form id="createTechnician"><label>Nombre y apellidos<input name="name" maxlength="150" required></label>
     <button class="primary" type="submit">Guardar técnico y crear acceso</button></form>
    <p>Para las fichas que ya existen, genera los accesos pendientes con un solo botón.</p>
@@ -602,7 +603,7 @@ async function resourceMatrix(c,section){
     <tbody>${entries.map(event=>{
      if(event.direct){
       const dates=event.date+(event.endDate!==event.date?' – '+event.endDate:'');
-      const team=event.team==='occident'?'Occident':'Netkom';
+      const team=teamName(event.team);
       return `<tr><th scope="row"><small>${esc(dates)}</small>Reserva sin actividad<small>${team}${event.reason?' · '+esc(event.reason):''}</small></th>
       ${cols.map(vehicle=>event.vehicles.includes(vehicle.id)?`<td class="resource-cell assigned">Reservado<small>${vehicleUsage(event)}</small></td>`:'<td>—</td>').join('')}</tr>`;
      }
@@ -846,7 +847,7 @@ async function vehicleLogsPage(c){
 
 function whatsAppPage(content){
  if(!['director','communication'].includes(me.role))return;
- const team=me.team==='occident'?'Occident':'Netkom';
+ const team=teamName(me.team);
  content.innerHTML=`<h1>Avisos por WhatsApp · ${team}</h1>
  <div class="card">
   <p>Prepara el mensaje aquí. En WhatsApp podrás elegir un contacto o grupo y pulsar Enviar.</p>

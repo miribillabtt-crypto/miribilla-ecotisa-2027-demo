@@ -11,7 +11,7 @@ import pyotp
 from openpyxl import Workbook
 from PIL import Image
 from roster_import import normalize
-from team_scope import NETKOM, OCCIDENT, configure_team_scope
+from team_scope import NETKOM, OCCIDENT, TEAMS, NEW_TEAMS, configure_team_scope
 from roster_import import OCCIDENT_CATEGORIES, import_roster
 
 Base=declarative_base()
@@ -212,18 +212,18 @@ def create_app(test_config=None):
     @require('director')
     def organization():
         g.organization_nonce=secrets.token_urlsafe(24)
-        return render_template('organization.html',organization_nonce=g.organization_nonce,organization_occident=g.team==OCCIDENT)
+        return render_template('organization.html',organization_nonce=g.organization_nonce,organization_empty=g.team!=NETKOM)
 
     @app.get('/api/me')
     def me():
         if not g.user:return jsonify(user=None)
-        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,canSwitchTeam=g.user.id=='shared-direction',clothes=CLOTHES,fines=FINE_TYPES)
+        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,teams=TEAMS,canSwitchTeam=g.user.id=='shared-direction',canInviteUsers=g.user.owner or (g.user.id=='shared-direction' and g.team in NEW_TEAMS),clothes=CLOTHES,fines=FINE_TYPES)
     @app.post('/api/team')
     @require('director')
     def switch_team():
         if g.user.id!='shared-direction':abort(403)
         team=body().get('team')
-        if team not in (NETKOM,OCCIDENT):abort(400)
+        if not isinstance(team,str) or team not in TEAMS:abort(400)
         session=g.db.get(LoginSession,g.login.id,with_for_update=True,populate_existing=True)
         session.team=team
         session.csrf=secrets.token_urlsafe(32)
@@ -356,7 +356,7 @@ def create_app(test_config=None):
     @app.post('/api/staff/accounts')
     @require('director')
     def create_staff_accounts():
-        if g.team==OCCIDENT:abort(403,'Gestiona los accesos de técnicos compartidos desde Netkom')
+        if g.team!=NETKOM:abort(403,'Gestiona los accesos de técnicos compartidos desde Netkom')
         import re
         from rider_accounts import alias_key
 
@@ -440,7 +440,7 @@ def create_app(test_config=None):
     @app.post('/api/invites')
     @require('director')
     def invite():
-        if not g.user.owner:abort(403,'Solo la dirección responsable puede dar altas')
+        if not (g.user.owner or (g.user.id=='shared-direction' and g.team in NEW_TEAMS)):abort(403,'Solo la dirección responsable puede dar altas')
         d=body();email=text(d,'email',254).lower();name=text(d,'name',100);role=text(d,'role',20)
         if not name or '@' not in email or role not in ROLES:abort(400,'Revisa nombre, correo y perfil')
         if g.db.scalar(select(User.id).where(User.email==email)):abort(409,'Ese usuario ya existe')
@@ -504,7 +504,9 @@ def create_app(test_config=None):
                 if k=='sizes' and any(val not in ['','XXS','XS','S','M','L','XL','XXL','XXXL'] for val in v.values()):abort(400)
                 if k=='quantities' and any(type(val)!=int or val<0 or val>100 for val in v.values()):abort(400)
             elif k=='category':
-                if v not in ('',*OCCIDENT_CATEGORIES):abort(400,'Categoría no válida')
+                if not isinstance(v,str) or len(v)>80 or (g.team not in NEW_TEAMS and v not in ('',*OCCIDENT_CATEGORIES)):
+                    abort(400,'Categoría no válida')
+                v=v.strip()
             elif k=='uciId':
                 if not isinstance(v,str) or (v and (len(v)!=11 or not v.isascii() or not v.isdigit())):abort(400,'El ID UCI debe tener 11 cifras')
             elif k=='competitionDays2026':
@@ -675,7 +677,7 @@ def create_app(test_config=None):
                 profile=unseal(u.profile)
                 year=str(profile.get('birthYear') or str(profile.get('birth') or '')[:4]).strip()
                 item['birthYear']=year if len(year)==4 and year.isdigit() else ''
-                if g.team==OCCIDENT:item['category']=profile.get('category','')
+                if g.team!=NETKOM:item['category']=profile.get('category','')
             riders.append(item)
         return jsonify(riders=riders)
     @app.post('/api/roster/<target>/status')
