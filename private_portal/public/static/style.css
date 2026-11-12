@@ -89,3 +89,7 @@
 .scanner-viewport{overflow:hidden}
 
 .organization-frame{display:block;width:100%;height:80vh;height:80dvh;border:1px solid #dae2ec;border-radius:12px;background:#fff}
+
+header:has(.occident-brand){background:#ac3d0d}
+.occident-brand .brand-logo{display:none}
+.occident-brand>div{border-left:0;padding-left:0}

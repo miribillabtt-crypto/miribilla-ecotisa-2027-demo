@@ -11,32 +11,39 @@ import pyotp
 from openpyxl import Workbook
 from PIL import Image
 from roster_import import normalize
+from team_scope import NETKOM, OCCIDENT, configure_team_scope
 
 Base=declarative_base()
 def uid(): return secrets.token_hex(16)
 def digest(v): return hashlib.sha256(v.encode()).hexdigest()
 class User(Base):
+    team=Column(String,nullable=False,default=NETKOM,server_default=NETKOM)
     __tablename__='users'
     id=Column(String,primary_key=True,default=uid); email=Column(String,unique=True,nullable=True); name=Column(String,nullable=False)
     role=Column(String,nullable=False); password=Column(Text,nullable=True); mfa=Column(LargeBinary,nullable=True); last_step=Column(Integer,default=-1)
     active=Column(Boolean,default=True); documents=Column(Boolean,default=False); owner=Column(Boolean,default=False)
     profile=Column(LargeBinary,nullable=False)
 class LoginSession(Base):
+    team=Column(String,nullable=False,default=NETKOM,server_default=NETKOM)
     __tablename__='sessions'
     id=Column(String,primary_key=True); user_id=Column(String,ForeignKey('users.id')); csrf=Column(String); expires=Column(Integer); seen=Column(Integer); remember=Column(Boolean,default=False,nullable=False)
 class Invite(Base):
+    team=Column(String,nullable=False,default=NETKOM,server_default=NETKOM)
     __tablename__='invites'
     token=Column(String,primary_key=True); email=Column(String,nullable=False); name=Column(String,nullable=False); role=Column(String,nullable=False)
     documents=Column(Boolean,default=False); secret=Column(LargeBinary,nullable=False); expires=Column(Integer); used=Column(Boolean,default=False)
     reset_user=Column(String,nullable=True); owner=Column(Boolean,default=False)
 class Record(Base):
+    team=Column(String,nullable=False,default=NETKOM,server_default=NETKOM)
     __tablename__='records'
     id=Column(String,primary_key=True,default=uid); kind=Column(String,index=True); owner_id=Column(String,index=True); data=Column(LargeBinary,nullable=False)
 class Document(Base):
+    team=Column(String,nullable=False,default=NETKOM,server_default=NETKOM)
     __tablename__='documents'
     id=Column(String,primary_key=True,default=uid); owner_id=Column(String,ForeignKey('users.id')); kind=Column(String); size=Column(Integer); mime=Column(String)
     created=Column(Integer); content=Column(LargeBinary,nullable=False)
 class Audit(Base):
+    team=Column(String,nullable=False,default=NETKOM,server_default=NETKOM)
     __tablename__='audit'
     id=Column(String,primary_key=True,default=uid); user_id=Column(String); action=Column(String); target=Column(String); at=Column(Integer)
 class Attempt(Base):
@@ -88,8 +95,13 @@ def create_app(test_config=None):
     if not dburl.startswith('sqlite'):
         with engine.begin() as connection:
             connection.execute(sql_text('ALTER TABLE mbb_private.sessions ADD COLUMN IF NOT EXISTS remember BOOLEAN NOT NULL DEFAULT FALSE'))
+            for table in ('users','sessions','invites','records','documents','audit'):
+                connection.execute(sql_text(
+                    f"ALTER TABLE mbb_private.{table} ADD COLUMN IF NOT EXISTS team VARCHAR NOT NULL DEFAULT 'netkom'"
+                ))
             connection.execute(sql_text('ALTER TABLE mbb_private.users ALTER COLUMN email DROP NOT NULL, ALTER COLUMN password DROP NOT NULL, ALTER COLUMN mfa DROP NOT NULL'))
-    Sessions=sessionmaker(bind=engine,expire_on_commit=False)
+    Sessions=sessionmaker(bind=engine,expire_on_commit=False,info={'team':NETKOM})
+    configure_team_scope(Sessions,(User,Invite,Document,Audit),Record)
     app.extensions['db_sessions']=Sessions; app.extensions['cipher']=cipher
     dummy_password=generate_password_hash(secrets.token_urlsafe(32),method='scrypt:32768:8:1')
     def seal(v): return cipher.encrypt(json.dumps(v,ensure_ascii=False).encode())
@@ -135,7 +147,8 @@ def create_app(test_config=None):
         return False
     @app.before_request
     def before():
-        g.db=Sessions();g.user=None;g.login=None
+        g.db=Sessions();g.user=None;g.login=None;g.team=NETKOM
+        g.db.info.pop('team',None)
         if request.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS'):
             expected=os.environ.get('PUBLIC_ORIGIN')
             if not app.testing:
@@ -147,6 +160,10 @@ def create_app(test_config=None):
             if row and row.expires>now and (row.remember or row.seen>now-1800):
                 u=g.db.get(User,row.user_id)
                 if u and u.active:g.user=u;g.login=row;row.seen=now
+        if g.user:
+            g.team=g.login.team if g.user.id=='shared-direction' else g.user.team
+            if request.path not in ('/api/activate/start','/api/activate/finish','/api/login'):
+                g.db.info['team']=g.team
         if request.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS') and g.login:
             if not secrets.compare_digest(request.headers.get('X-CSRF-Token',''),g.login.csrf):abort(403,'Recarga la sesión')
     @app.after_request
@@ -192,12 +209,42 @@ def create_app(test_config=None):
     @require('director')
     def organization():
         g.organization_nonce=secrets.token_urlsafe(24)
-        return render_template('organization.html',organization_nonce=g.organization_nonce)
+        return render_template('organization.html',organization_nonce=g.organization_nonce,organization_occident=g.team==OCCIDENT)
 
     @app.get('/api/me')
     def me():
         if not g.user:return jsonify(user=None)
-        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,clothes=CLOTHES,fines=FINE_TYPES)
+        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,canSwitchTeam=g.user.id=='shared-direction',clothes=CLOTHES,fines=FINE_TYPES)
+    @app.post('/api/team')
+    @require('director')
+    def switch_team():
+        if g.user.id!='shared-direction':abort(403)
+        team=body().get('team')
+        if team not in (NETKOM,OCCIDENT):abort(400)
+        session=g.db.get(LoginSession,g.login.id,with_for_update=True,populate_existing=True)
+        session.team=team
+        session.csrf=secrets.token_urlsafe(32)
+        audit('team_switched',team)
+        return jsonify(ok=True)
+
+    @app.post('/api/occident/administrator-invite')
+    @require('director')
+    def invite_occident_administrator():
+        if g.user.id!='shared-direction' or g.team!=OCCIDENT:abort(403)
+        username='occident.alextoledo'
+        if g.db.get_bind().dialect.name=='postgresql':
+            g.db.execute(sql_text('SELECT pg_advisory_xact_lock(20273009)'))
+        existing=g.db.scalar(select(User.id).where(User.email==username)
+                             .execution_options(shared_resource_lookup=True))
+        if existing:abort(409,'Alex Toledo ya ha activado su acceso a Occident')
+        g.db.execute(update(Invite).where(Invite.email==username,Invite.used==False).values(used=True))
+        token=secrets.token_urlsafe(40)
+        g.db.add(Invite(token=digest(token),email=username,name='Alex Toledo',role='director',
+                        documents=True,owner=False,secret=seal(pyotp.random_base32()),
+                        expires=int(time.time())+48*3600))
+        audit('occident_administrator_invited',username)
+        return jsonify(token=token,username=username)
+
     @app.post('/api/login')
     def login():
         d=body();email=text(d,'email',254).lower();password=text(d,'password',256);code=text(d,'code',10)
@@ -211,8 +258,8 @@ def create_app(test_config=None):
         valid=check_password_hash(u.password if u and u.password else dummy_password,password)
         if not u or not u.active or not valid:audit('login_failed');g.db.commit();abort(401,'Credenciales o código incorrectos')
         remember=d.get('remember') in (True,'on');lifetime=30*86400 if remember else 8*3600
-        token=secrets.token_urlsafe(40);now=int(time.time());g.db.add(LoginSession(id=digest(token),user_id=u.id,csrf=secrets.token_urlsafe(32),expires=now+lifetime,seen=now,remember=remember))
-        g.user=u;audit('login',u.id);response=jsonify(ok=True)
+        token=secrets.token_urlsafe(40);now=int(time.time());g.db.add(LoginSession(id=digest(token),user_id=u.id,team=u.team,csrf=secrets.token_urlsafe(32),expires=now+lifetime,seen=now,remember=remember))
+        g.user=u;g.db.info['team']=u.team;audit('login',u.id);response=jsonify(ok=True)
         response.set_cookie('__Host-mbb',token,secure=True,httponly=True,samesite='Strict',path='/',max_age=lifetime if remember else None)
         return response
     @app.post('/api/logout')
@@ -272,11 +319,11 @@ def create_app(test_config=None):
             g.db.execute(delete(LoginSession).where(LoginSession.user_id==u.id))
         else:
             if g.db.scalar(select(User.id).where(User.email==i.email)):abort(409,'Usuario existente')
-            u=User(email=i.email,name=i.name,role=i.role,password=generate_password_hash(password,method='scrypt:32768:8:1'),mfa=i.secret,last_step=int(time.time())//30,documents=i.documents,owner=i.owner,profile=seal({}))
+            u=User(email=i.email,name=i.name,role=i.role,team=i.team,password=generate_password_hash(password,method='scrypt:32768:8:1'),mfa=i.secret,last_step=int(time.time())//30,documents=i.documents,owner=i.owner,profile=seal({}))
             g.db.add(u);g.db.flush()
         related=Invite.reset_user==u.id if roster_activation else Invite.email==i.email
         g.db.execute(update(Invite).where(related,Invite.used==False).values(used=True))
-        i.used=True;audit('account_activated',u.id);return jsonify(ok=True)
+        i.used=True;g.db.info['team']=i.team;audit('account_activated',u.id);return jsonify(ok=True)
     def issue_rider_invite(rider, expires):
         token=secrets.token_urlsafe(40)
         g.db.add(Invite(token=digest(token),email='',name=rider.name,role='runner',reset_user=rider.id,secret=seal(pyotp.random_base32()),expires=expires))
@@ -306,6 +353,7 @@ def create_app(test_config=None):
     @app.post('/api/staff/accounts')
     @require('director')
     def create_staff_accounts():
+        if g.team==OCCIDENT:abort(403,'Gestiona los accesos de técnicos compartidos desde Netkom')
         import re
         from rider_accounts import alias_key
 
@@ -753,6 +801,8 @@ def create_app(test_config=None):
     register_settlements(app,Record,User,CLOTHES,seal,unseal,audit,require,body)
     from account_summary import register_account_summary
     register_account_summary(app,User,Record,unseal,audit,require)
+    from space_reservations import register_space_reservations
+    register_space_reservations(app,Record,seal,unseal,audit,require,body)
     from resources import register_resources
     register_resources(app,Record,seal,unseal,audit,require,body)
     from modules import register_modules

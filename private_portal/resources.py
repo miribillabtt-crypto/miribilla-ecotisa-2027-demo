@@ -8,12 +8,39 @@ def availability_key(event, resource):
     return 'resource-status:'+hashlib.sha256((event+':'+resource).encode()).hexdigest()
 
 
+def other_team_resource_bookings(db, Record, unseal, team):
+    # Project only encrypted rows here. Never load another team's ORM records
+    # into the identity map used by the rest of the request.
+    rows = db.execute(
+        select(Record.kind, Record.id, Record.data)
+        .where(Record.team != team, Record.kind.in_(('event', 'module:travel')))
+        .execution_options(shared_resource_lookup=True)
+    ).all()
+    dates = {}
+    for row in rows:
+        if row.kind == 'event':
+            activity = unseal(row.data)
+            start = activity.get('date', '')
+            if start:
+                dates[row.id] = (start, max(start, activity.get('endDate') or start))
+    bookings = []
+    for row in rows:
+        if row.kind == 'module:travel':
+            travel = unseal(row.data)
+            if travel['event'] in dates:
+                start, end = dates[travel['event']]
+                bookings.append(dict(date=start, endDate=end,
+                                     resources=travel.get('staff', [])+travel.get('vehicles', [])))
+    return bookings
+
+
 def register_resources(app, Record, seal, unseal, audit, require, body):
     @app.get('/api/resource-availability')
     @require('director','technician')
     def resource_availability():
-        return jsonify(records=[unseal(row.data) for row in g.db.scalars(
-            select(Record).where(Record.kind=='system:resource-availability'))])
+        records = [unseal(row.data) for row in g.db.scalars(
+            select(Record).where(Record.kind=='system:resource-availability'))]
+        return jsonify(records=records, shared=other_team_resource_bookings(g.db, Record, unseal, g.team))
 
     @app.post('/api/resource-availability')
     @require('director')

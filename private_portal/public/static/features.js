@@ -31,10 +31,20 @@ async function dashboardPage(c){
   ['vehiclelogs','Registrar km','Salida, regreso e historial de vehículos'],
   ['conta','Contabilidad','Facturas, cobros por corredor y conciliación'],
  ];
- c.innerHTML=`<h1>Panel de Dirección</h1>
+ c.innerHTML=`<h1>Panel de Dirección · ${me.team==='occident'?'Occident':'Netkom'}</h1>
+  ${me.team==='occident'&&me.canSwitchTeam?`<section class="card"><h2>Acceso de Alex Toledo</h2><button type="button" id="inviteOccidentAdmin">Generar enlace de activación</button><div id="occidentInviteResult" aria-live="polite"></div></section>`:''}
   <div class="grid direction-actions">${actions.map(([id,title,desc])=>`<button type="button" class="tile" data-shortcut="${id}"><strong>${title}</strong><small>${desc}</small></button>`).join('')}</div>
   <h2>Resumen del equipo</h2><div class="metricgrid">${[[s.riders,'Corredores activos'],[s.events,'Actividades'],[s.staff,'Técnicos'],[s.vehicles,'Vehículos'],[euros(s.income),'Ingresos registrados'],[euros(s.expenses),'Gastos registrados']].map(([v,label])=>`<div class="card"><small>${label}</small><strong class="metric">${v}</strong></div>`).join('')}</div>`;
  c.querySelectorAll('[data-shortcut]').forEach(b=>b.onclick=()=>navigate(b.dataset.shortcut));
+ const invite=c.querySelector('#inviteOccidentAdmin');
+ if(invite)invite.onclick=async()=>{
+  invite.disabled=true;
+  try{
+   const {token,username}=await api('/occident/administrator-invite','POST',{});
+   c.querySelector('#occidentInviteResult').innerHTML=`<p>Usuario <strong>${esc(username)}</strong>. El enlace caduca en 48 horas.</p><label>Enlace para Alex Toledo<input readonly value="${esc(inviteLink(token))}"></label>`;
+  }catch(error){message(error.message);}
+  finally{invite.disabled=false;}
+ };
 }
 async function getContext(kind){const [events,riders]=await Promise.all([api('/events'),api('/roster')]);const ctx={events:events.events,riders:riders.riders,people:[],staff:[],vehicle:[],entry:[],budget:[]};if(['director','technician'].includes(me.role))ctx.people=(await api('/people')).people;if(kind==='travel'){if(me.role!=='runner'){ctx.staff=(await api('/modules/staff')).records;ctx.vehicle=(await api('/modules/vehicle')).records;}}if(kind==='entry')ctx.budget=(await api('/modules/budget')).records;if(kind==='bank')ctx.entry=(await api('/modules/entry')).records;return ctx;}
 async function equipmentPage(c){
@@ -197,7 +207,7 @@ c.querySelectorAll('[data-split-expense]').forEach(button=>button.onclick=async(
 });
 c.querySelectorAll('[data-edit]').forEach(b=>{
  b.onclick=()=>redraw(b.dataset.edit).catch(e=>message(e.message));
- if(kind==='staff')bindStaffPassword(b,rows.find(row=>row.id===b.dataset.edit),issuedStaff);
+ if(kind==='staff'&&me.team!=='occident')bindStaffPassword(b,rows.find(row=>row.id===b.dataset.edit),issuedStaff);
 });c.querySelectorAll('[data-archive]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Archivar este registro? Se puede restaurar desde Archivados.'))return;try{await api('/modules/'+kind+'/'+b.dataset.archive+'/archive','POST',{});await redraw();}catch(e){message(e.message);}});}
 table();if(kind==='entry')c.querySelector('#entryClubTotals').onclick=event=>{if(event.target.id==='openClubSettlement')navigate('clubsettlement');};if(event)c.refreshActivitySection=table;document.getElementById('moduleSearch').oninput=table;if(kind==='entry')c.querySelector('#entryClubFilter').onchange=table;if(document.getElementById('licenseStatus'))document.getElementById('licenseStatus').onchange=table;if(canEdit){document.getElementById('openNew').onclick=async()=>{
  if(event&&editing){try{await redraw();}catch(err){message(err.message);return;}}
@@ -467,13 +477,16 @@ async function resourceMatrix(c,section){
   const other=events.find(candidate=>candidate.id!==event.id&&overlap(event,candidate)&&
    (assignments.get(candidate.id)?.[kind]||[]).includes(resource.id));
   if(other)return {label:kind==='vehicles'?'Reservado':'No disponible',style:'unavailable',fixed:true,note:other.name};
+  if((overrides.shared||[]).some(booking=>booking.resources.includes(resource.id)&&overlap(event,booking))){
+   return {label:'Reservado',style:'unavailable',fixed:true,note:me.team==='occident'?'Netkom':'Occident'};
+  }
   const manual=statusRows.find(row=>row.event===event.id&&row.resource===resource.id);
   const answer=manual?.status||(kind==='staff'?event.responses?.[resource.user]:null);
   const label=answer||(kind==='vehicles'?(event.date?'Disponible':'Por confirmar'):'Por confirmar');
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
  c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
-  ${section==='staff'&&me.role==='director'?`<details class="card"><summary>Altas y contraseñas de técnicos</summary>
+  ${section==='staff'&&me.role==='director'&&me.team!=='occident'?`<details class="card"><summary>Altas y contraseñas de técnicos</summary>
    <form id="createTechnician"><label>Nombre y apellidos<input name="name" maxlength="150" required></label>
     <button class="primary" type="submit">Guardar técnico y crear acceso</button></form>
    <p>Para las fichas que ya existen, genera los accesos pendientes con un solo botón.</p>

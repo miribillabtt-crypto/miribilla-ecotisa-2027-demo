@@ -138,7 +138,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   return start,max(start,event.get('endDate') or start)
 
  def check_vehicle_reservations(data,event,skip=None):
-  from resources import availability_key
+  from resources import availability_key, other_team_resource_bookings
   for resource_id in data.get('staff',[])+data.get('vehicles',[]):
    status=g.db.get(Record,availability_key(data['event'],resource_id))
    if status and unseal(status.data)['status']=='No disponible':
@@ -151,6 +151,13 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
      response=g.db.get(Record,hashlib.sha256((data['event']+':'+person).encode()).hexdigest())
      if response and unseal(response.data).get('status')=='No disponible':
       abort(409,'Un técnico ha indicado que no está disponible')
+  shared_ids=set(data.get('vehicles',[])+data.get('staff',[]))
+  if not shared_ids:return
+  start,end=travel_range(event)
+  if start:
+   for booking in other_team_resource_bookings(g.db,Record,unseal,g.team):
+    if shared_ids.intersection(booking['resources']) and start<=booking['endDate'] and booking['date']<=end:
+     abort(409,'Un vehículo o técnico ya está asignado al otro equipo en esas fechas')
   if not data.get('vehicles'):return
   start,end=travel_range(event)
   if not start:abort(400,'Indica la fecha de inicio de la actividad antes de reservar vehículos')
@@ -179,7 +186,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   for staff_id in dict.fromkeys(planning.get('staff',[])):
    staff=g.db.get(Record,staff_id)
    if not staff or staff.kind!='module:staff':continue
-   identity=g.db.get(Record,'hotel-id:'+staff_id)
+   identity=g.db.get(Record,('occident:hotel-id:' if g.team=='occident' else 'hotel-id:')+staff_id)
    people.append(dict(id=staff.id,name=unseal(staff.data)['name'],role='Técnico',dni=unseal(identity.data).get('dni','') if identity else ''))
   return event,people
 
@@ -203,10 +210,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   dni=dni.strip().upper()
   if dni and not re.fullmatch(r'[A-Z0-9-]{4,20}',dni):abort(400,'Número de documento no válido')
   g.db.get(Record,staff_id,with_for_update=True)
-  identity=g.db.get(Record,'hotel-id:'+staff_id)
+  identity=g.db.get(Record,('occident:hotel-id:' if g.team=='occident' else 'hotel-id:')+staff_id)
   if dni:
    if identity:identity.data=seal({'dni':dni})
-   else:g.db.add(Record(id='hotel-id:'+staff_id,kind='system:hotel-id',owner_id=staff_id,data=seal({'dni':dni})))
+   else:g.db.add(Record(id=('occident:hotel-id:' if g.team=='occident' else 'hotel-id:')+staff_id,kind='system:hotel-id',owner_id=staff_id,data=seal({'dni':dni})))
   elif identity:g.db.delete(identity)
   audit('hotel_staff_identity_updated',staff_id)
   return jsonify(ok=True)

@@ -77,8 +77,11 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
         audit('trip_expenses_split', event_id)
         return jsonify(total=total, riders=len(riders))
 
+    def shop_key():
+        return 'occident:clothing-shop' if g.team=='occident' else 'clothing-shop'
+
     def shop_settings():
-        config = g.db.get(Record, 'clothing-shop')
+        config = g.db.get(Record, shop_key())
         return unseal(config.data) if config else dict(prices={}, director='')
 
     @app.get('/api/shop')
@@ -105,12 +108,12 @@ def register_settlements(app, Record, User, clothes, seal, unseal, audit, requir
         director = g.db.get(User, director_id) if isinstance(director_id, str) and director_id else None
         if not director or director.role != 'director' or not director.active or (not director.email or '@' not in director.email):
             abort(400, 'Elige un director con correo registrado')
-        item = g.db.get(Record, 'clothing-shop', with_for_update=True)
+        item = g.db.get(Record, shop_key(), with_for_update=True)
         data = seal(dict(prices=prices, director=director.id))
         if item:
             item.data = data
         else:
-            g.db.add(Record(id='clothing-shop', kind='system:shop', owner_id=g.user.id, data=data))
+            g.db.add(Record(id=shop_key(), kind='system:shop', owner_id=g.user.id, data=data))
         audit('shop_configured', director.id)
         return jsonify(ok=True)
 

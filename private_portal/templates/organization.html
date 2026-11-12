@@ -150,7 +150,13 @@ try{S=JSON.parse(storedState||'null')}catch(e){S=null}
 function seedTasks(){return [
   {id:uid(),title:'Revisar el estado de las bicis del taller',notes:'',coach:'',kind:'weekly',days:[0],date:'',done:false,doneDates:[]},
   {id:uid(),title:'Preparar el material de la semana siguiente',notes:'',coach:'',kind:'weekly',days:[4],date:'',done:false,doneDates:[]}]}
-if(!S||!S.groups)S=seed();
+if(!S||!S.groups){
+  S=seed();
+  if({{ organization_occident|default(false)|tojson }}){
+    S.coaches=[];S.slots=[];S.sessions=[];S.tasks=[];S.routinesV1=true;
+    S.groups.forEach(group=>{group.coord='';});
+  }
+}
 const ROUTINE=[[0,'Poner entrenamientos Training Peaks'],[0,'Planning competiciones'],[0,'Revisar inscripciones'],[0,'Preparar gimnasio'],[0,'Actualizar SITES'],[1,'Planificar entrenamiento CX'],[1,'Avanzar en el libro Gordo'],[1,'Organizar STAFF fin de semana'],[2,'Revisar tickets Taller y cobrar'],[2,'Pedidos de taller'],[2,'Organizar Local, limpieza y orden'],[2,'Planificar gimnasios'],[3,'Cargar furgonetas finde'],[4,'Planificar semana que viene']];
 if(!S.tasks)S.tasks=[];
 if(!S.routinesV1){
