@@ -500,7 +500,7 @@ views.schedule=()=>{
    (isRunner?`<hr class="rule" style="margin:5px 0"><div class="row between"><strong>Mi disponibilidad</strong>${tag(myStatus)}</div>${availabilityChoiceButtons(ev,r.id)}<p class="muted" style="margin:0">${selected?(call.status==='Publicada'?'Ya estás convocado':'Seleccionado, pendiente de publicar'):'Dirección todavía puede valorar tu disponibilidad'}</p>`:'')+
    (isTechnician&&st?`<hr class="rule"><div class="row between"><strong>Mi disponibilidad</strong>${tag(staffStatus(ev.id,st.id))}</div>${staffChoiceButtons(ev,st.id)}<p class="muted">${eventStaffIds(ev).includes(st.id)?'Asignado/a a la actividad':'Pendiente de selección por Dirección'}</p>`:'')+
    (isDirector?`<div class="boxnote"><b>${avail.Disponible} disponibles</b> · ${avail['Pendiente de respuesta']} sin responder<br><span class="muted">${avail['No disponible']} no disponibles · ${avail['Baja por enfermedad']} bajas</span></div>`:'')+
-   `<div class="actions"><button class="btn outline" data-action="view-event" data-id="${enc(ev.id)}">Información y horarios</button>${isDirector?`<button class="btn primary" data-action="manage-call" data-id="${enc(ev.id)}">Convocar disponibles</button><button class="btn" data-action="manage-activity" data-id="${enc(ev.id)}">Gestionar</button>`:''}</div></article>`;
+   `<div class="actions"><button class="btn outline" data-action="view-event" data-id="${enc(ev.id)}">Información y horarios</button>${ev.category==='Carrera'&&(isDirector||isTechnician)?`<button class="btn outline" data-performance-event="${enc(ev.id)}">Rendimiento</button>`:''}${isDirector?`<button class="btn primary" data-action="manage-call" data-id="${enc(ev.id)}">Convocar disponibles</button><button class="btn" data-action="manage-activity" data-id="${enc(ev.id)}">Gestionar</button>`:''}</div></article>`;
  }).join('')}</div>`:`<div class="empty">Todavía no hay actividades para este filtro.</div>`)+
  `<p class="helper">${isRunner?'Al marcar tu estado aparece guardado en este navegador. En la versión definitiva se sincronizará con Dirección.':'Esta web es una demo sin base de datos compartida. Para compartir respuestas entre móviles necesitamos la versión privada.'}</p>`;
 };
@@ -512,7 +512,7 @@ function clothingTotals(){const out=new Map();for(const r of clothingRows().filt
 views.clothes=()=>title('Ropa · Tallas y pedido del equipo','Desde Dirección puedes modificar la talla de cada prenda de cada corredor. El cambio se guarda en su ficha y se refleja en el pedido de ropa.')+`<div class="toolbar"><button class="btn primary" data-action="download-clothes">Descargar pedido · Excel</button></div><div class="boxnote mb">Las cantidades no registradas empiezan en 0. Las tallas de ejemplo de la demo deben revisarse antes de enviar el pedido.</div><div class="card"><h3>Por corredor</h3><div class="tablewrap"><table><thead><tr><th>Corredor</th><th>Prenda</th><th>Talla</th><th>Unidades a pedir</th></tr></thead><tbody>${clothingRows().map(r=>`<tr><td>${enc(r.name)}</td><td>${enc(r.label)}</td><td><select aria-label="Talla de ${enc(r.label)} para ${enc(r.name)}" data-clothing-size-rider="${enc(r.id)}" data-clothing-size-key="${enc(r.key)}" style="min-width:90px">${options(sizes,r.size==='Sin indicar'?'':r.size)}</select></td><td><input aria-label="Unidades de ${enc(r.label)} para ${enc(r.name)}" type="number" min="0" max="100" step="1" value="${r.quantity}" data-clothing-rider="${enc(r.id)}" data-clothing-key="${r.key}" style="width:85px"></td></tr>`).join('')}</tbody></table></div></div><div class="card mt"><h3>Total por prendas y tallas</h3>${clothingTotals().length?`<table><thead><tr><th>Prenda</th><th>Talla</th><th>Total</th></tr></thead><tbody>${clothingTotals().map(row=>'<tr>'+row.map(v=>'<td>'+enc(v)+'</td>').join('')+'</tr>').join('')}</tbody></table>`:'<p>Sin unidades registradas para pedir.</p>'}</div>`;
 function downloadClothing(){if(role!=='director')return;const rows=clothingRows().filter(r=>r.quantity>0);if(!rows.length)return notify('Indica las cantidades antes de descargar el pedido.',true);const row=values=>'<Row>'+values.map(v=>'<Cell><Data ss:Type="'+(typeof v==='number'?'Number':'String')+'">'+enc(v)+'</Data></Cell>').join('')+'</Row>';const xml='<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?><Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"><Worksheet ss:Name="Por corredor"><Table>'+row(['Corredor','Prenda','Talla','Cantidad'])+rows.map(r=>row([r.name,r.label,r.size,r.quantity])).join('')+'</Table></Worksheet><Worksheet ss:Name="Resumen proveedor"><Table>'+row(['Prenda','Talla','Cantidad'])+clothingTotals().map(row).join('')+'</Table></Worksheet></Workbook>';const url=URL.createObjectURL(new Blob([xml],{type:'application/vnd.ms-excel'}));const a=document.createElement('a');a.href=url;a.download='MIRIBILLA_ECOTISA_PEDIDO_ROPA.xml';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);}
 document.addEventListener('change',e=>{const sizeRider=e.target.dataset.clothingSizeRider;if(sizeRider){if(role!=='director')return;const r=getR(sizeRider),key=e.target.dataset.clothingSizeKey,value=e.target.value;if(!r||r.archivedAt||!clothingFields.some(f=>f[0]===key)||!sizes.includes(value))return notify('No se pudo modificar la talla.',true);r[key]=value;save();render();return;}const id=e.target.dataset.clothingRider;if(!id||role!=='director')return;const quantity=Number(e.target.value),key=e.target.dataset.clothingKey;if(!Number.isInteger(quantity)||quantity<0||quantity>100||!clothingFields.some(f=>f[0]===key))return notify('Cantidad no válida.',true);db.clothingQuantities??={};db.clothingQuantities[id]??={};db.clothingQuantities[id][key]=quantity;save();render();});
-views.profile=()=>{const r=currentR(),p=db.profiles?.[r.id]||{};let tabs=[['personal','Datos personales'],['sport','Datos deportivos'],['media','Fotos de comunicación'],['documents','Mis documentos'],['finance','Cuenta y SEPA']];return title(role==='director'?'Ficha completa del corredor':'Mi área personal',role==='director'?'Dirección puede consultar y editar las fichas individuales. En esta demo los cambios se guardan únicamente en este navegador.':'Simulación de la vista del corredor. El acceso individual privado se configurará en la plataforma definitiva.')+`<div class="toolbar"><span class="muted">${role==='director'?'CORREDOR SELECCIONADO':'VISTA SIMULADA DE CORREDOR'}</span><select id="riderSelector">${riderOptions()}</select>${role==='director'?`<button class="btn outline" data-action="view-as-rider">Ver como corredor</button><button class="btn warn" data-action="archive-rider" data-id="${r.id}" ${r.archivedAt?'disabled':''}>${r.archivedAt?'Archivado':'Archivar ficha'}</button>`:''}${role==='director'?'<button class="btn outline" data-action="fine-rider" data-id="'+enc(r.id)+'">Multas · '+money(fineTotalForRider(r.id))+'</button>':''}</div><div class="profilehead"><div class="avatar">${enc((r.name||'C').slice(0,1))}</div><div><strong style="font-size:20px">${enc(r.name)} ${enc(r.surname||'')}</strong><br><small>Júnior · ${enc(r.teamClub||'Club pendiente de asignar')} · 2027</small></div></div><div class="seg">${tabs.map(x=>`<button class="btn ${profileTab===x[0]?'active':''}" data-profile-tab="${x[0]}">${x[1]}</button>`).join('')}</div>${profileTab==='personal'?`<div class="card"><h3>Datos generales del corredor</h3><div class="boxnote warn mb">Los nombres abreviados y las tallas de maillot identifican los 22 registros aportados. Los apellidos desconocidos y todos los contactos, domicilios, tutores, DNI y datos bancarios son ficticios. No introducir datos reales en esta demo pública.</div><form id="personalForm"><div class="grid2">${field('Nombre / alias facilitado','name',r.name,'text','Nombre del corredor')}${field('Apellidos (sin aportar)','surname',r.surname||'','text','Pendiente de completar')}${sel('Club del equipo','teamClub',r.teamClub||'Pendiente de asignar',['Pendiente de asignar','Miribilla','Ecotisa'])}${field('Fecha nacimiento (FICTICIA)','birth',p.birth||'','date')}${field('Identificación de prueba','dni',p.dni||'')}${field('Teléfono (FICTICIO)','phone',p.phone||'','tel')}${field('Email (FICTICIO)','email',p.email||'','text')}${field('Domicilio (FICTICIO)','address',p.address||'')}${field('Población (FICTICIA)','city',p.city||'')}${sel('Salida habitual para viajes','departureDefault',p.departureDefault||defaultOrigin(r),['Bilbao','Zaragoza','Gernika','Otra / por concretar'])}${field('Punto de recogida habitual','pickupPoint',p.pickupPoint||'')}${field('Código postal (FICTICIO)','zip',p.zip||'')}${field('Provincia (FICTICIA)','province',p.province||'')}${field('Nº licencia DEMO','licenseNumber',r.licenseNumber)}</div><div class="section-label">Padres / tutores legales · TODO FICTICIO</div><div class="grid2">${field('Tutor 1 · nombre y apellidos','guardian1',p.guardian1||'')}${field('Tutor 1 · parentesco','relation1',p.relation1||'')}${field('Tutor 1 · teléfono','phone1',p.phone1||'','tel')}${field('Tutor 1 · correo','email1',p.email1||'','text')}${field('Tutor 2 · nombre y apellidos','guardian2',p.guardian2||'')}${field('Tutor 2 · parentesco','relation2',p.relation2||'')}${field('Tutor 2 · teléfono','phone2',p.phone2||'','tel')}${field('Tutor 2 · correo','email2',p.email2||'','text')}</div><div class="actionbar"><button class="btn primary" type="submit">Guardar datos generales DEMO</button></div></form></div>`:profileTab==='sport'?`<div class="card"><h3>Datos deportivos y tallas por prenda</h3><p class="muted">Solo la talla de maillot corto procede de tu listado. Las demás tallas, modelos y medidas son EJEMPLOS FICTICIOS.</p><form id="sportForm"><div class="grid2"><div class="formsep">Ropa de competición</div>${sel('Maillot corto · talla aportada','jersey',r.jersey,['XXS','XS','S','M','L','XL','XXL'])}${sel('Maillot largo','jerseyLong',r.jerseyLong||'',sizes)}${sel('Culote corto','bib',r.bib||'',sizes)}${sel('Culote largo','bibLong',r.bibLong||'',sizes)}${sel('Gava','gava',r.gava||'',sizes)}${sel('Buzo','skinsuit',r.skinsuit||'',sizes)}${sel('Casco','helmet',r.helmet||'',sizes)}<div class="formsep">Ropa de calle</div>${sel('Pantalón largo','streetPantsLong',r.streetPantsLong||'',sizes)}${sel('Pantalón corto','streetPantsShort',r.streetPantsShort||'',sizes)}${sel('Camiseta','streetShirt',r.streetShirt||'',sizes)}${sel('Polo','streetPolo',r.streetPolo||'',sizes)}${sel('Sudadera','streetSweatshirt',r.streetSweatshirt||'',sizes)}${sel('Plumas','streetPuffer',r.streetPuffer||'',sizes)}<div class="formsep">Bicicleta y ajuste</div>${field('Marca y modelo de bicicleta','bike',r.bike)}${field('Talla de bicicleta / cuadro','bikeSize',r.bikeSize)}${sel('Tipo de pedales','pedals',r.pedals||'',['','Shimano SPD-SL','Look Kéo','Time','Speedplay','Shimano SPD','Otros'])}${field('Preparador físico','coach',r.coach)}${field('Club de origen','club',r.club)}${field('Alto: altura del sillín (mm)','saddleHeight',r.saddleHeight,'number','Ej. 720','min="400" max="1100"')}${field('Largo: distancia sillín a manillar (mm)','saddleToBar',r.saddleToBar,'number','Ej. 540','min="200" max="1200"')}</div><div class="boxnote mt">Solo las dos medidas acordadas: altura del sillín y distancia del sillín al manillar. Los dos valores mostrados son ficticios. Sin retroceso, fechas, estudios ni informes biomecánicos.</div><div class="actionbar"><button class="btn primary" type="submit">Guardar datos deportivos</button></div></form></div>`:profileTab==='documents'?documentsView(r.id):profileTab==='media'?mediaRiderCard(r.id,true):`<div class="card"><h3>Cuenta de prueba y mandato SEPA</h3><div class="boxnote warn">Datos confidenciales. Los datos precargados son ficticios y las referencias no son cuentas válidas. No introduzcas IBAN reales en una demo pública. En la plataforma publicada este apartado tendrá permisos de administración.</div><form id="financeForm"><div class="grid2">${field('Titular de cuenta (ficticio)','bankHolder',p.bankHolder||'')}${field('IBAN de prueba — no real','iban',p.iban||'','text','Ej. IBAN ficticio')}${sel('Estado SEPA','sepaStatus',p.sepaStatus||'Pendiente',['Pendiente','Recibido','Verificado','Revocado'])}${field('Referencia mandato de prueba','sepaRef',p.sepaRef||'')}</div><div class="actionbar"><button class="btn primary" type="submit">Aplicar datos simulados</button></div></form><p class="helper">La firma y el archivo SEPA deben conservarse únicamente en el servidor privado definitivo.</p></div>`}`};
+views.profile=()=>{const r=currentR(),p=db.profiles?.[r.id]||{};let tabs=[['personal','Datos personales'],['sport','Datos deportivos'],['performance','Rendimiento'],['media','Fotos de comunicación'],['documents','Mis documentos'],['finance','Cuenta y SEPA']];return title(role==='director'?'Ficha completa del corredor':'Mi área personal',role==='director'?'Dirección puede consultar y editar las fichas individuales. En esta demo los cambios se guardan únicamente en este navegador.':'Simulación de la vista del corredor. El acceso individual privado se configurará en la plataforma definitiva.')+`<div class="toolbar"><span class="muted">${role==='director'?'CORREDOR SELECCIONADO':'VISTA SIMULADA DE CORREDOR'}</span><select id="riderSelector">${riderOptions()}</select>${role==='director'?`<button class="btn outline" data-action="view-as-rider">Ver como corredor</button><button class="btn warn" data-action="archive-rider" data-id="${r.id}" ${r.archivedAt?'disabled':''}>${r.archivedAt?'Archivado':'Archivar ficha'}</button>`:''}${role==='director'?'<button class="btn outline" data-action="fine-rider" data-id="'+enc(r.id)+'">Multas · '+money(fineTotalForRider(r.id))+'</button>':''}</div><div class="profilehead"><div class="avatar">${enc((r.name||'C').slice(0,1))}</div><div><strong style="font-size:20px">${enc(r.name)} ${enc(r.surname||'')}</strong><br><small>Júnior · ${enc(r.teamClub||'Club pendiente de asignar')} · 2027</small></div></div><div class="seg">${tabs.map(x=>`<button class="btn ${profileTab===x[0]?'active':''}" data-profile-tab="${x[0]}">${x[1]}</button>`).join('')}</div>${profileTab==='performance'?performanceHistory(sessionRole==='runner'?sessionRider:r.id):profileTab==='personal'?`<div class="card"><h3>Datos generales del corredor</h3><div class="boxnote warn mb">Los nombres abreviados y las tallas de maillot identifican los 22 registros aportados. Los apellidos desconocidos y todos los contactos, domicilios, tutores, DNI y datos bancarios son ficticios. No introducir datos reales en esta demo pública.</div><form id="personalForm"><div class="grid2">${field('Nombre / alias facilitado','name',r.name,'text','Nombre del corredor')}${field('Apellidos (sin aportar)','surname',r.surname||'','text','Pendiente de completar')}${sel('Club del equipo','teamClub',r.teamClub||'Pendiente de asignar',['Pendiente de asignar','Miribilla','Ecotisa'])}${field('Fecha nacimiento (FICTICIA)','birth',p.birth||'','date')}${field('Identificación de prueba','dni',p.dni||'')}${field('Teléfono (FICTICIO)','phone',p.phone||'','tel')}${field('Email (FICTICIO)','email',p.email||'','text')}${field('Domicilio (FICTICIO)','address',p.address||'')}${field('Población (FICTICIA)','city',p.city||'')}${sel('Salida habitual para viajes','departureDefault',p.departureDefault||defaultOrigin(r),['Bilbao','Zaragoza','Gernika','Otra / por concretar'])}${field('Punto de recogida habitual','pickupPoint',p.pickupPoint||'')}${field('Código postal (FICTICIO)','zip',p.zip||'')}${field('Provincia (FICTICIA)','province',p.province||'')}${field('Nº licencia DEMO','licenseNumber',r.licenseNumber)}</div><div class="section-label">Padres / tutores legales · TODO FICTICIO</div><div class="grid2">${field('Tutor 1 · nombre y apellidos','guardian1',p.guardian1||'')}${field('Tutor 1 · parentesco','relation1',p.relation1||'')}${field('Tutor 1 · teléfono','phone1',p.phone1||'','tel')}${field('Tutor 1 · correo','email1',p.email1||'','text')}${field('Tutor 2 · nombre y apellidos','guardian2',p.guardian2||'')}${field('Tutor 2 · parentesco','relation2',p.relation2||'')}${field('Tutor 2 · teléfono','phone2',p.phone2||'','tel')}${field('Tutor 2 · correo','email2',p.email2||'','text')}</div><div class="actionbar"><button class="btn primary" type="submit">Guardar datos generales DEMO</button></div></form></div>`:profileTab==='sport'?`<div class="card"><h3>Datos deportivos y tallas por prenda</h3><p class="muted">Solo la talla de maillot corto procede de tu listado. Las demás tallas, modelos y medidas son EJEMPLOS FICTICIOS.</p><form id="sportForm"><div class="grid2"><div class="formsep">Ropa de competición</div>${sel('Maillot corto · talla aportada','jersey',r.jersey,['XXS','XS','S','M','L','XL','XXL'])}${sel('Maillot largo','jerseyLong',r.jerseyLong||'',sizes)}${sel('Culote corto','bib',r.bib||'',sizes)}${sel('Culote largo','bibLong',r.bibLong||'',sizes)}${sel('Gava','gava',r.gava||'',sizes)}${sel('Buzo','skinsuit',r.skinsuit||'',sizes)}${sel('Casco','helmet',r.helmet||'',sizes)}<div class="formsep">Ropa de calle</div>${sel('Pantalón largo','streetPantsLong',r.streetPantsLong||'',sizes)}${sel('Pantalón corto','streetPantsShort',r.streetPantsShort||'',sizes)}${sel('Camiseta','streetShirt',r.streetShirt||'',sizes)}${sel('Polo','streetPolo',r.streetPolo||'',sizes)}${sel('Sudadera','streetSweatshirt',r.streetSweatshirt||'',sizes)}${sel('Plumas','streetPuffer',r.streetPuffer||'',sizes)}<div class="formsep">Bicicleta y ajuste</div>${field('Marca y modelo de bicicleta','bike',r.bike)}${field('Talla de bicicleta / cuadro','bikeSize',r.bikeSize)}${sel('Tipo de pedales','pedals',r.pedals||'',['','Shimano SPD-SL','Look Kéo','Time','Speedplay','Shimano SPD','Otros'])}${field('Preparador físico','coach',r.coach)}${field('Club de origen','club',r.club)}${field('Alto: altura del sillín (mm)','saddleHeight',r.saddleHeight,'number','Ej. 720','min="400" max="1100"')}${field('Largo: distancia sillín a manillar (mm)','saddleToBar',r.saddleToBar,'number','Ej. 540','min="200" max="1200"')}</div><div class="boxnote mt">Solo las dos medidas acordadas: altura del sillín y distancia del sillín al manillar. Los dos valores mostrados son ficticios. Sin retroceso, fechas, estudios ni informes biomecánicos.</div><div class="actionbar"><button class="btn primary" type="submit">Guardar datos deportivos</button></div></form></div>`:profileTab==='documents'?documentsView(r.id):profileTab==='media'?mediaRiderCard(r.id,true):`<div class="card"><h3>Cuenta de prueba y mandato SEPA</h3><div class="boxnote warn">Datos confidenciales. Los datos precargados son ficticios y las referencias no son cuentas válidas. No introduzcas IBAN reales en una demo pública. En la plataforma publicada este apartado tendrá permisos de administración.</div><form id="financeForm"><div class="grid2">${field('Titular de cuenta (ficticio)','bankHolder',p.bankHolder||'')}${field('IBAN de prueba — no real','iban',p.iban||'','text','Ej. IBAN ficticio')}${sel('Estado SEPA','sepaStatus',p.sepaStatus||'Pendiente',['Pendiente','Recibido','Verificado','Revocado'])}${field('Referencia mandato de prueba','sepaRef',p.sepaRef||'')}</div><div class="actionbar"><button class="btn primary" type="submit">Aplicar datos simulados</button></div></form><p class="helper">La firma y el archivo SEPA deben conservarse únicamente en el servidor privado definitivo.</p></div>`}`};
 function documentsView(rid){let list=db.docs[rid]||[];return `<div class="card"><h3>Expediente documental del corredor · MODELOS</h3><div class="boxnote warn">Los cinco documentos que aparecen abajo son MODELOS FICTICIOS SIN VALIDEZ. Puedes verlos y descargarlos como PDF de prueba. No subas documentos reales a esta web pública. Las fotografías tomadas aquí no se conservan.</div><div class="grid2 mt"><div class="field"><label>Tipo de documento</label><select id="docType">${options(['Licencia federativa','Autorización tutor legal','DNI/NIE de prueba','Ficha de inscripción','Mandato SEPA de prueba','Otro'],docsType)}</select></div><div class="field"><label>Cara del documento</label><select id="docSide">${options(['Anverso','Reverso','Una cara'],docsSide)}</select></div></div><div class="filedrop mt"><p style="font-size:28px;margin:0">▣</p><strong>Tomar foto o seleccionar imagen</strong><p class="muted">Busca luz uniforme, fondo plano y cuatro esquinas visibles.</p><input type="file" id="scanInput" accept="image/jpeg,image/png,image/webp" capture="environment" disabled><p class="muted">Desactivado en la web pública para proteger documentos personales.</p></div>${preview?`<div class="docpreview mt"><img src="${preview.url}" alt="Vista previa de fotografía de prueba" style="transform:rotate(${preview.rotation}deg)"><div class="muted">${enc(preview.name)} · Previsualización local</div></div><div class="actionbar"><button class="btn outline" data-action="rotate-scan">Girar 90°</button><button class="btn" data-action="clear-scan">Repetir</button><button class="btn primary" data-action="confirm-scan">Simular envío</button></div>`:'<p class="muted mt">Los cinco PDFs ficticios descargables ya están disponibles abajo. La carga de fotografías reales está desactivada para esta demo pública.</p>'}<hr class="rule"><h4>Estado documental · ${list.length} registros de prueba</h4>${list.length?list.map(d=>`<div class="line"><div><strong>${enc(d.type)}</strong><div class="muted">${enc(d.side)} · ${enc(d.name)} · ${enc(d.status)}</div></div><div class="row"><button class="btn outline" data-action="preview-demo-doc" data-id="${d.id}">Ver</button><button class="btn primary" data-action="download-demo-doc" data-id="${d.id}">PDF</button>${d.generated?'':`<button class="btn outline" data-action="remove-doc" data-id="${d.id}">Eliminar</button>`}</div></div>`).join(''):'<div class="empty">Sin archivos de prueba registrados.</div>'}</div>`}
 views.calls=()=>{
  if(role==='runner'){
@@ -1377,10 +1377,190 @@ document.addEventListener('input',e=>{let el=e.target;const search=(id,cb)=>{if(
 document.addEventListener('submit',e=>{if(e.target.id==='demoLoginForm'){e.preventDefault();handleDemoLogin(e.target);return}if(e.target.id==='budgetForm'){e.preventDefault();saveBudgets(e.target);return}if(e.target.id==='fineForm'){e.preventDefault();registerFine(e.target);return}if(['personalForm','financeForm','sportForm','resultForm'].includes(e.target.id))handleForm(e)});
 document.addEventListener('change',e=>{if(e.target.id==='fineRiderFilter'){fineFilterRider=e.target.value;render();}else if(e.target.id==='fineStatusFilter'){fineFilterStatus=e.target.value;render();}else if(e.target.id==='fineReason'){const type=fineCatalog.find(x=>x.id===e.target.value),tip=document.querySelector('#fineAmountNotice');if(tip)tip.textContent=type?(type.serious?'Falta grave: propuesta de expulsión pendiente de revisión por Dirección (0 €; no automática).':'Importe fijo: '+type.amount+' €'):'Selecciona un motivo del desplegable.';}});
 $('#backupBtn').onclick=exportData;
-function importBackup(file){const reader=new FileReader();reader.onload=()=>{try{let data=JSON.parse(reader.result);if(!Array.isArray(data.riders)||!Array.isArray(data.events)||!Array.isArray(data.calls)||!Array.isArray(data.staff)||!Array.isArray(data.vehicles)||!Array.isArray(data.results))throw Error('Estructura no válida');if(!confirm('¿Sustituir los datos de prueba actuales por los del archivo?'))return;let validated=initial();for(const k of ['riders','events','calls','staff','vehicles','results','profiles','docs','trips','receipts','deletedIds','conta','availabilityByEvent','staffAvailabilityByEvent','actualDays','fines','clothingQuantities'])if(data[k]!==undefined)validated[k]=data[k];db=validated;ensureConta();selectedEventId=db.events[0]?.id||'';riderId=db.riders[0]?.id||'';clearPreview();render();save();notify('Copia de prueba importada.')}catch(err){notify('No se pudo importar la copia: '+err.message,true)}};reader.readAsText(file)}
+function importBackup(file){const reader=new FileReader();reader.onload=()=>{try{let data=JSON.parse(reader.result);if(!Array.isArray(data.riders)||!Array.isArray(data.events)||!Array.isArray(data.calls)||!Array.isArray(data.staff)||!Array.isArray(data.vehicles)||!Array.isArray(data.results))throw Error('Estructura no válida');if(!confirm('¿Sustituir los datos de prueba actuales por los del archivo?'))return;let validated=initial();for(const k of ['riders','events','calls','staff','vehicles','results','profiles','docs','trips','receipts','deletedIds','conta','availabilityByEvent','staffAvailabilityByEvent','actualDays','fines','clothingQuantities','performanceResults'])if(data[k]!==undefined)validated[k]=data[k];db=validated;ensureConta();selectedEventId=db.events[0]?.id||'';riderId=db.riders[0]?.id||'';clearPreview();render();save();notify('Copia de prueba importada.')}catch(err){notify('No se pudo importar la copia: '+err.message,true)}};reader.readAsText(file)}
 // Botón de importación siempre disponible en la zona superior.
 const extra=document.createElement('input');extra.type='file';extra.id='importInput';extra.accept='.json,application/json';extra.className='hidden';extra.addEventListener('change',()=>{if(extra.files?.[0])importBackup(extra.files[0]);extra.value='' });document.body.appendChild(extra);
 const restoreButton=document.createElement('button');restoreButton.className='linkbtn';restoreButton.textContent='Importar copia';restoreButton.onclick=()=>extra.click();$('#backupBtn').insertAdjacentElement('afterend',restoreButton);
+let performanceEventId = '';
+let performanceRiderId = '';
+let performancePreview = null;
+menus.technician.push(['results','Rendimiento']);
+menus.runner.push(['results','Mi rendimiento']);
+
+const performanceName = rider => [rider.name,rider.surname].filter(Boolean).join(' ');
+const performanceKey = value => String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+const performanceStaff = () => ['director','technician'].includes(role) && sessionRole !== 'runner';
+const performanceEvents = () => db.events.filter(event => event.category === 'Carrera').slice().sort((a,b) => String(b.date).localeCompare(String(a.date)));
+const performanceBatches = () => Object.values(db.performanceResults || {}).filter(batch => getE(batch.eventId));
+const performancePct = value => value == null ? '—' : new Intl.NumberFormat('es-ES',{maximumFractionDigits:1}).format(value) + ' %';
+
+function performanceTime(value) {
+ const parts = String(value ?? '').trim().split(':');
+ if (!parts.every(part => /^\d+$/.test(part)) || parts.length < 2 || parts.length > 3 || parts.slice(1).some(part => Number(part) >= 60)) return null;
+ const seconds = parts.reduce((total,part) => total * 60 + Number(part),0);
+ return seconds > 0 && Number.isSafeInteger(seconds) ? seconds : null;
+}
+
+function performanceParse(rows) {
+ const [header,...body] = rows;
+ if (!header || !body.length) throw Error('El archivo está vacío.');
+ const columns = header.map(performanceKey);
+ const required = ['nombre','categoria','puesto','tiempo','estado','vueltas'];
+ if (required.slice(0,3).some(field => !columns.includes(field))) throw Error('Usa las columnas nombre, categoria y puesto. Puedes añadir tiempo, estado y vueltas.');
+ const seen = new Set();
+ const groups = new Map();
+ const roster = new Map();
+ for (const rider of db.riders) {
+  const key = performanceKey(performanceName(rider));
+  roster.set(key,[...(roster.get(key) || []),rider.id]);
+ }
+ const entries = body.map((row,index) => {
+  const [name,category,rawPlace,rawTime,rawStatus,rawLaps] = required.map(field => String(row[columns.indexOf(field)] ?? '').trim());
+  const group = performanceKey(category);
+  const place = Number(rawPlace);
+  const statusCode = performanceKey(rawStatus || rawPlace);
+  const status = {dnf:'Abandono',dns:'No salió',dsq:'Descalificado',otl:'Fuera de control'}[statusCode] || 'Clasificado';
+  const seconds = performanceTime(rawTime);
+  const laps = rawLaps === '' ? null : Number(rawLaps);
+  if (!performanceKey(name) || !group || (status === 'Clasificado' && (!Number.isSafeInteger(place) || place < 1)) || (rawTime && seconds === null) || (laps !== null && (!Number.isSafeInteger(laps) || laps < 0))) throw Error('Revisa los datos de la fila '+(index+2)+'.');
+  const key = group+'|'+performanceKey(name);
+  if (seen.has(key)) throw Error('Nombre duplicado en la misma categoría en la fila '+(index+2)+'.');
+  seen.add(key);
+  const matches = roster.get(performanceKey(name)) || [];
+  const entry = {name,category,group,place:status === 'Clasificado' ? place : null,status,seconds,laps,riderId:matches.length === 1 ? matches[0] : ''};
+  if (!groups.has(group)) groups.set(group,[]);
+  if (entry.place !== null) groups.get(group).push(entry);
+  return entry;
+ });
+ for (const classified of groups.values()) {
+  const places = classified.map(entry => entry.place).sort((a,b) => a-b);
+  if (places.some((place,index) => place !== index+1)) throw Error('La categoría '+classified[0].category+' tiene puestos repetidos o incompletos. Incluye la clasificación completa.');
+ }
+ return {entries,groups};
+}
+
+function performanceMetrics(entry,group) {
+ const ranked = group.filter(row => row.place !== null);
+ const winner = ranked.find(row => row.place === 1);
+ const gap = entry.place && winner?.seconds && entry.seconds >= winner.seconds &&
+  (entry.laps === null || winner.laps === null || entry.laps === winner.laps) ? entry.seconds-winner.seconds : null;
+ return {relative:entry.place ? 100*entry.place/ranked.length : null,gap,gapPct:gap === null ? null : 100*gap/winner.seconds,total:ranked.length};
+}
+
+function performanceHistory(id) {
+ if (!id) return '<div class="empty">Selecciona un corredor.</div>';
+ const imported = performanceBatches().flatMap(batch => batch.entries.filter(entry => entry.riderId === id).map(entry => {
+  const group = batch.entries.filter(row => row.group === entry.group);
+  const metrics = performanceMetrics(entry,group);
+  const team = group.filter(row => row.riderId && row.place).map(row => 100*row.place/metrics.total).sort((a,b) => a-b);
+  const middle = Math.floor(team.length/2);
+  const median = team.length ? (team[middle]+team[Math.floor((team.length-1)/2)])/2 : null;
+  return {event:getE(batch.eventId),entry,metrics,median,url:allowedHttpsUrl(batch.source)};
+ }));
+ const legacy = db.results.filter(row => row.riderId === id && getE(row.eventId) && !imported.some(result => result.event.id === row.eventId))
+  .map(row => ({event:getE(row.eventId),entry:{place:row.place,notes:row.notes},metrics:{}}));
+ const history = [...imported,...legacy].sort((a,b) => String(b.event.date).localeCompare(String(a.event.date)));
+ return history.length ? '<div style="overflow:auto"><table><thead><tr><th>Prueba</th><th>Categoría</th><th>Puesto</th><th>% categoría</th><th>Mediana del equipo</th><th>Diferencia</th><th>Vueltas</th></tr></thead><tbody>'+
+  history.map(({event,entry,metrics,median,url}) => `<tr><td>${enc(event.name)} · ${enc(event.date||'')}${url?` · <a href="${enc(url)}" target="_blank" rel="noopener noreferrer">Fuente</a>`:''}${entry.notes?`<br><small>${enc(entry.notes)}</small>`:''}</td><td>${enc(entry.category||'—')}</td><td>${enc(entry.place ?? entry.status ?? '—')}${entry.place && metrics.total?' de '+metrics.total:''}</td><td>${performancePct(metrics.relative)}</td><td>${performancePct(median)}</td><td>${metrics.gap == null?'—':`+${metrics.gap} s · ${performancePct(metrics.gapPct)}`}</td><td>${enc(entry.laps ?? '—')}</td></tr>`).join('')+'</tbody></table></div>'
+  : '<div class="empty">Este corredor todavía no tiene resultados registrados.</div>';
+}
+
+const previousResultsView = views.results;
+views.results = () => {
+ const canEdit = performanceStaff();
+ const rider = canEdit ? getR(performanceRiderId) : getR(sessionRole === 'runner' ? sessionRider : currentR()?.id);
+ const events = performanceEvents();
+ const event = events.find(item => item.id === performanceEventId) || events[0];
+ const batch = db.performanceResults?.[event?.id];
+ const source = allowedHttpsUrl(batch?.source || (event && linkedRaceResources(event).results));
+ const pending = performancePreview?.eventId === event?.id ? performancePreview : null;
+ const names = db.riders.map(item => ({value:item.id,label:performanceName(item)}));
+ const groups = new Map();
+ for (const item of batch?.entries || []) {
+  if (!groups.has(item.category)) groups.set(item.category,[]);
+  groups.get(item.category).push(item);
+ }
+ return title(canEdit?'Rendimiento':'Mi rendimiento')+
+  (canEdit ? `<div class="card"><h3>Clasificaciones del calendario</h3>
+  <label for="performanceEvent">Carrera</label><select id="performanceEvent">${options(events.map(item => ({value:item.id,label:item.name+' · '+(item.date||'')})),event?.id)}</select>
+  ${event ? `<div class="actionbar">${source?`<a class="btn outline" href="${enc(source)}" target="_blank" rel="noopener noreferrer">Clasificación enlazada</a>`:''}
+  <a class="btn outline" href="https://www.google.com/search?q=${encodeURIComponent([event.name,event.date,event.location,'clasificación resultados'].filter(Boolean).join(' '))}" target="_blank" rel="noopener noreferrer">Buscar clasificación</a>
+  <button class="btn outline" type="button" id="performanceTemplate">Plantilla CSV</button></div>
+  <p>${batch?`Cargada: ${enc(batch.fileName)} · ${batch.entries.length} filas`:'Pendiente de importar'}</p>
+  <label for="performanceSource">Enlace de la clasificación oficial</label><input id="performanceSource" type="url" value="${enc(source)}" placeholder="https://…">
+  <label for="performanceFile">Clasificación completa en Excel o CSV</label><input id="performanceFile" type="file" accept=".csv,.xlsx">
+  <p class="helper">Usa nombre, categoria y puesto. Opcionales: tiempo (mm:ss o hh:mm:ss), estado (DNF, DNS, DSQ u OTL) y vueltas.</p>`:'<p>Añade una carrera al calendario para importar resultados.</p>'}
+  ${pending ? `<form id="performanceConfirm"><p>${pending.entries.length} filas · ${pending.entries.filter(row => row.riderId).length} coincidencias en plantilla. Revisa los nombres; deja en blanco los participantes externos.</p>
+  <div style="overflow:auto"><table><thead><tr><th>Nombre oficial</th><th>Categoría</th><th>Resultado</th><th>Corredor de la plantilla</th></tr></thead><tbody>
+  ${pending.entries.map((row,index) => `<tr><td>${enc(row.name)}</td><td>${enc(row.category)}</td><td>${enc(row.place ?? row.status)}</td><td><select name="match-${index}" aria-label="Vincular a ${enc(row.name)}">${options([{value:'',label:'Sin vincular'},...names],row.riderId)}</select></td></tr>`).join('')}
+  </tbody></table></div><button class="btn primary" type="submit">${batch?'Reemplazar clasificación':'Guardar clasificación'}</button></form>`:''}</div>
+  ${batch ? `<div class="card mt"><h3>Equipo por categoría</h3>${[...groups].map(([category,entries]) => {
+   const team = entries.filter(row => row.riderId && row.status !== 'No salió');
+   const total = entries.filter(row => row.place).length;
+   const teamPlaces = team.filter(row => row.place).map(row => row.place).sort((a,b) => a-b);
+   const m = teamPlaces.length ? 50*(teamPlaces[Math.floor(teamPlaces.length/2)]+teamPlaces[Math.floor((teamPlaces.length-1)/2)])/total : null;
+   return `<div class="line"><b>${enc(category)}</b><span>${team.length} del equipo · ${total} clasificados en la prueba · ${team.filter(row=>row.status==='Abandono').length} abandonos · Mediana del equipo ${performancePct(m)}</span></div>`;
+  }).join('')}</div>`:''}` : '')+
+  `<div class="card mt"><h3>${canEdit?'Ficha de rendimiento':enc(rider ? performanceName(rider) : 'Corredor')}</h3>${canEdit ? `<label for="performanceRider">Corredor</label><select id="performanceRider">${options([{value:'',label:'Elige corredor'},...names],rider?.id||'')}</select>`:''}${performanceHistory(rider?.id)}</div>`+
+  (role === 'director' ? `<details class="mt"><summary>Registro manual de resultados</summary>${previousResultsView()}</details>` : '');
+};
+
+document.addEventListener('change',async event => {
+ const input = event.target;
+ if (!performanceStaff() || section !== 'results') return;
+ if (input.id === 'performanceRider') {performanceRiderId=input.value;render();return;}
+ if (input.id === 'performanceEvent') {performanceEventId=input.value;performancePreview=null;render();return;}
+ if (input.id !== 'performanceFile' || !input.files?.[0]) return;
+ const eventId = $('#performanceEvent').value;
+ const source = $('#performanceSource').value.trim();
+ const file = input.files[0];
+ try {
+  if (source && !allowedHttpsUrl(source)) throw Error('Usa un enlace HTTPS.');
+  if (file.size > 4*1024*1024 || !/\.(csv|xlsx)$/i.test(file.name)) throw Error('Usa Excel .xlsx o CSV de hasta 4 MB.');
+  const rows = /\.xlsx$/i.test(file.name) ? await bankExcelRows(file) : bankCsvRows(await file.text());
+  if (!performanceStaff() || section !== 'results' || $('#performanceEvent').value !== eventId || !input.isConnected) return;
+  const {entries} = performanceParse(rows);
+  performanceEventId = eventId;
+  performancePreview = {eventId,source,fileName:file.name,entries};
+  render();
+  $('#performanceSource').value = source;
+ } catch (error) {notify(error.message,true);input.value='';}
+});
+document.addEventListener('submit',event => {
+ if (event.target.id !== 'performanceConfirm') return;
+ event.preventDefault();
+ if (!performanceStaff() || !performancePreview || !getE(performancePreview.eventId)) return;
+ const source = $('#performanceSource').value.trim();
+ if (source && !allowedHttpsUrl(source)) return notify('Usa un enlace HTTPS.',true);
+ const form = new FormData(event.target);
+ const entries = performancePreview.entries.map((row,index) => ({...row,riderId:String(form.get('match-'+index)||'')}));
+ const ids = entries.map(row => row.riderId).filter(Boolean);
+ if (new Set(ids).size !== ids.length || ids.some(id => !getR(id))) return notify('Cada corredor debe aparecer una sola vez en la clasificación.',true);
+ const previous = db.performanceResults;
+ const batch = {...performancePreview,source,entries};
+ db.performanceResults = {...previous,[batch.eventId]:batch};
+ try {
+  localStorage.setItem(KEY,JSON.stringify(db));
+ } catch {
+  db.performanceResults = previous;
+  return notify('No se pudo guardar. La clasificación anterior se conserva.',true);
+ }
+ performancePreview=null;
+ render();
+ notify('Clasificación guardada y fichas actualizadas.');
+},true);
+document.addEventListener('click',event => {
+ const button = event.target.closest('[data-performance-event]');
+ if (button && performanceStaff() && getE(button.dataset.performanceEvent)) {
+  performanceEventId=button.dataset.performanceEvent;
+  performancePreview=null;
+  section='results';
+  render();
+  return;
+ }
+ if (event.target.id === 'performanceTemplate' && performanceStaff()) csv('plantilla_clasificacion.csv',[['nombre','categoria','puesto','tiempo','estado','vueltas']]);
+});
+
 restore();db.mediaPosts??=[];db.mediaConsent??={};db.mediaPhotoInfo??={};showLogin();hydrateMediaPhotos();
 })();
 </script></body></html>
