@@ -156,6 +156,12 @@ def create_app(test_config=None):
         response.headers['Referrer-Policy']='no-referrer'
         response.headers['X-Frame-Options']='DENY'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' blob:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        if getattr(g,'organization_nonce',None):
+            response.headers['X-Frame-Options']='SAMEORIGIN'
+            response.headers['Content-Security-Policy']=(
+                "default-src 'none'; script-src 'nonce-"+g.organization_nonce+"'; "
+                "style-src 'unsafe-inline'; frame-ancestors 'self'; sandbox allow-scripts; "
+                "base-uri 'none'; form-action 'none'")
         response.headers['Permissions-Policy']='camera=(self), microphone=(), geolocation=()'
         if not app.testing:response.headers['Strict-Transport-Security']='max-age=31536000; includeSubDomains'
         if hasattr(g,'db'):
@@ -180,6 +186,12 @@ def create_app(test_config=None):
         return jsonify(status='ok',rosterImported=receipt['total']) if receipt else jsonify(status='ok')
     @app.get('/')
     def index():return render_template('index.html')
+    @app.get('/organizacion')
+    @require('director')
+    def organization():
+        g.organization_nonce=secrets.token_urlsafe(24)
+        return render_template('organization.html',organization_nonce=g.organization_nonce)
+
     @app.get('/api/me')
     def me():
         if not g.user:return jsonify(user=None)

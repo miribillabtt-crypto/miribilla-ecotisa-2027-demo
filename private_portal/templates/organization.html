@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>MIRIBILLA CYCLING</title>
+<style>
+:root{--bg:#f3f5f7;--card:#fff;--ink:#14202b;--mut:#5b6b79;--line:#d9e0e6;--acc:#0f4c81;--acc-ink:#fff;--danger:#b3261e}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f161d;--card:#18222c;--ink:#e8eef3;--mut:#93a4b3;--line:#2a3846;--acc:#5aa9e6;--acc-ink:#0b1620;--danger:#ff8a80}}
+:root[data-theme="dark"]{--bg:#0f161d;--card:#18222c;--ink:#e8eef3;--mut:#93a4b3;--line:#2a3846;--acc:#5aa9e6;--acc-ink:#0b1620;--danger:#ff8a80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:400 16px/1.5 Barlow,system-ui,-apple-system,"Segoe UI",sans-serif}
+h1,h2,h3{font-family:"Barlow Condensed","Arial Narrow",sans-serif;font-weight:700;letter-spacing:.01em;margin:0}
+header.top{padding:20px 16px 0;max-width:1100px;margin:0 auto}
+h1{font-size:2rem;line-height:1.1}
+header.top p{margin:4px 0 0;color:var(--mut)}
+nav{display:flex;gap:4px;max-width:1100px;margin:16px auto 0;padding:0 16px;overflow-x:auto;border-bottom:1px solid var(--line)}
+nav button{background:none;border:0;border-bottom:3px solid transparent;padding:10px 14px;font:600 1rem Barlow,sans-serif;color:var(--mut);cursor:pointer;white-space:nowrap}
+nav button[aria-current="true"]{color:var(--ink);border-color:var(--acc)}
+main{max-width:1100px;margin:0 auto;padding:20px 16px 48px}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:20px}
+.panel h2{font-size:1.35rem;margin-bottom:12px}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:end}
+label{display:flex;flex-direction:column;font-size:.85rem;color:var(--mut);gap:4px;flex:1 1 130px}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;width:100%}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.btn{font:600 1rem Barlow,sans-serif;background:var(--acc);color:var(--acc-ink);border:0;border-radius:6px;padding:9px 16px;cursor:pointer}
+.btn.ghost{background:none;color:var(--ink);border:1px solid var(--line)}
+.x{background:none;border:0;color:var(--mut);cursor:pointer;font:500 .9rem Barlow,sans-serif;padding:2px 6px;border-radius:4px}
+.x:hover{color:var(--danger)}
+.days{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+.day{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px;min-height:80px}
+.day h3{font-size:1.05rem;margin-bottom:6px}
+.slot{background:var(--card);border-left:5px solid var(--c);border-radius:4px;padding:6px 8px;margin-bottom:6px;font-size:.88rem;position:relative}
+.slot b{display:block;font-size:.95rem;padding-right:20px}
+.slot .x{position:absolute;top:2px;right:0;font-size:1.1rem}
+.chip{display:inline-block;font-size:.78rem;font-weight:600;padding:1px 9px;border-radius:99px;background:var(--c);color:#fff}
+.item{padding:12px 0;border-top:1px solid var(--line)}
+.item:first-of-type{border-top:0}
+.between{display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+.checks{display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:6px}
+.checks label{flex-direction:row;align-items:center;gap:6px;color:var(--ink);font-size:.92rem;flex:0 0 auto}
+.checks input{width:auto}
+.mut{color:var(--mut);font-size:.9rem}
+.empty{color:var(--mut);padding:8px 0}
+.sec{font-size:1.1rem;margin:4px 0 4px;padding-bottom:4px;border-bottom:2px solid var(--line)}
+.sess{border:1px solid var(--line);border-left:6px solid var(--c);border-radius:8px;padding:12px 14px;margin-bottom:12px;background:var(--card)}
+.sess h3{font-size:1.25rem}
+.ex{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:8px 0;border-top:1px dashed var(--line)}
+.ex span:nth-child(2){font-weight:600;color:var(--mut)}
+.ex p{grid-column:1/-1;margin:0;color:var(--mut);font-size:.9rem}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+.filters button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:99px;padding:5px 14px;font:600 .9rem Barlow,sans-serif;cursor:pointer}
+.filters button[aria-pressed="true"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.draft-ex{display:flex;justify-content:space-between;gap:8px;padding:6px 10px;background:var(--bg);border-radius:6px;margin-top:6px;font-size:.92rem}
+.msg{color:var(--danger);font-size:.9rem;margin:8px 0;min-height:1.2em}
+.dtabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.dtabs button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:6px 14px;font:600 .95rem Barlow,sans-serif;cursor:pointer}
+.dtabs button[aria-pressed="true"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.tlwrap{overflow-x:auto;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.tl{display:grid;grid-template-columns:52px repeat(6,minmax(150px,1fr));min-width:980px}
+.tlh{padding:8px;font:700 1.05rem "Barlow Condensed","Arial Narrow",sans-serif;border-bottom:1px solid var(--line);background:var(--card);border-left:1px solid var(--line)}
+.tlh.un{color:var(--mut)}
+.tlt{position:relative}
+.tlt span{position:absolute;right:6px;font-size:.75rem;color:var(--mut)}
+.tlc{position:relative;border-left:1px solid var(--line);background-image:linear-gradient(var(--line) 1px,transparent 1px);background-size:100% var(--hh)}
+.blk{position:absolute;background:var(--card);border:1px solid var(--line);border-left:5px solid var(--c);border-radius:5px;padding:3px 5px;font-size:.8rem;overflow:hidden;line-height:1.25}
+.blk.bad{outline:2px solid var(--danger);outline-offset:-2px}
+.blk b{display:block}
+.blk select{padding:2px 4px;font-size:.75rem;margin-top:3px}
+.warn{border:1px solid var(--danger);border-radius:8px;padding:10px 14px;margin-bottom:14px;color:var(--danger);font-size:.92rem}
+.warn p{margin:2px 0}
+.wk{width:100%;border-collapse:collapse;font-size:.85rem;min-width:760px}
+.wk th,.wk td{border:1px solid var(--line);padding:5px 6px;vertical-align:top;text-align:left}
+.wk th{background:var(--bg);font-weight:600}
+.wk .ln{display:block;margin-bottom:3px}
+.day.today{border-color:var(--acc);box-shadow:inset 0 0 0 1px var(--acc)}
+.tk{display:flex;gap:4px;justify-content:space-between;align-items:flex-start;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:6px 8px;margin-bottom:6px;font-size:.9rem}
+.tk label{flex-direction:row;align-items:flex-start;gap:8px;color:var(--ink);font-size:.9rem;flex:1 1 auto}
+.tk input{width:auto;margin-top:4px}
+.tk.done b{text-decoration:line-through;color:var(--mut)}
+.alert{border:2px solid var(--acc);border-left-width:8px;border-radius:10px;background:var(--card);padding:14px 16px;margin-bottom:20px}
+.alert h2{font-size:1.5rem;margin-bottom:8px}
+.alert.ok{border-color:var(--line);border-left-color:var(--acc)}
+.calh{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;margin-bottom:4px;font:700 .95rem "Barlow Condensed","Arial Narrow",sans-serif;color:var(--mut);text-align:center}
+.calg{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.cal{display:flex;flex-direction:column;align-items:stretch;gap:2px;text-align:left;min-height:96px;padding:4px 5px;background:var(--card);border:1px solid var(--line);border-radius:6px;color:var(--ink);font:400 .75rem/1.25 Barlow,sans-serif;cursor:pointer;overflow:hidden;min-width:0}
+.cal.out{opacity:.5}
+.cal.today .cn{background:var(--acc);color:var(--acc-ink);border-radius:99px;padding:0 6px}
+.cal.sel{outline:2px solid var(--acc);outline-offset:-2px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:var(--acc);box-sizing:border-box}
+.dot.tkd{background:transparent;border:2px solid var(--acc)}
+.cn{font-weight:700;font-size:.9rem;align-self:flex-start}
+.ce{display:block;background:var(--c);color:#fff;border-radius:3px;padding:0 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cm{color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:640px){.cal{min-height:70px;padding:3px}.ce,.cm{font-size:.68rem}.lbl{display:none}}
+.ath{min-width:680px}
+.ath td,.ath th{vertical-align:middle}
+.eform{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;padding:12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;margin:8px 0}
+.filters button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.nbadge{display:inline-block;min-width:20px;padding:0 6px;margin-left:6px;border-radius:99px;background:var(--acc);color:var(--acc-ink);font-size:.8rem;text-align:center}
+.pill{display:inline-block;font-size:.78rem;font-weight:600;padding:1px 9px;border-radius:99px;border:1px solid var(--line);margin-right:4px}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>MIRIBILLA CYCLING</h1>
+</header>
+<nav id="nav"></nav>
+<main id="app"><p id="organizationLoading">Abre Organización desde el menú de Dirección.</p></main>
+<p id="organizationStorageStatus" role="status"></p>
+
+<script nonce="{{ organization_nonce }}">
+'use strict';
+const portalOrigin=location.origin;
+const embedded=window.parent!==window;
+let initialized=false;
+window.addEventListener('message',event=>{
+ if(!embedded||event.source!==window.parent||event.origin!==portalOrigin)return;
+ if(event.data?.type==='miribilla-organization-storage-error'){
+  document.getElementById('organizationStorageStatus').textContent='No se han podido guardar los cambios en este navegador.';
+  return;
+ }
+ if(initialized||event.data?.type!=='miribilla-organization-load')return;
+ initialized=true;
+ startOrganization(event.data.state);
+});
+function startOrganization(storedState){
+const DAYS=['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+const SECTIONS={escuela:'Escuela de ciclismo',competicion:'Equipo de competición'};
+const SPACES=['Exterior','Gela','Taller','Pabellón','Gimnasio'];
+const COLORS=['#2a8fd6','#1f7a8c','#2e8b57','#7a5cc0','#d6402f','#b8501a','#8a2f6a','#4a5a68'];
+const uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function seed(){
+  const coaches=[['c1','Entrenador 1'],['c2','Entrenador 2'],['c3','Entrenador 3'],['c4','Entrenador 4'],['c5','Entrenador 5'],['c6','Entrenador 6']];
+  const groups=[['g1','Haurrak','escuela','c1'],['g2','Benjamin','escuela','c2'],['g3','Alevin','escuela','c3'],['g4','Infantil','escuela','c4'],['g5','Cadetes','competicion','c5'],['g6','Junior','competicion','c6'],['g7','Sub23','competicion','']];
+  const G=groups.map((g,i)=>({id:g[0],name:g[1],section:g[2],coord:g[3],color:COLORS[i]}));
+  const C=coaches.map(([id,name])=>({id,name,groups:G.filter(g=>g.coord===id).map(g=>g.id)}));
+  const sl=(days,start,end,group)=>days.map(d=>({id:uid(),day:d,start,end,group,coach:'',space:''}));
+  return {groups:G,coaches:C,
+    slots:[...sl([0,2],'17:30','19:00','g1'),...sl([1,3],'17:30','19:00','g2'),...sl([1,3],'17:30','19:00','g3'),...sl([1,3],'17:30','19:30','g4')],
+    sessions:[{id:uid(),title:'Equilibrio y control de la bici',group:'g1',obj:'Ganar confianza con el manillar y los frenos.',ex:[
+      {name:'Slalom entre conos',min:10,desc:'Recorrido de 8 conos a ritmo lento.'},
+      {name:'Frenada progresiva',min:10,desc:'Frenar en una zona marcada sin bloquear la rueda.'}]}]};
+}
+let S;
+try{S=JSON.parse(storedState||'null')}catch(e){S=null}
+function seedTasks(){return [
+  {id:uid(),title:'Revisar el estado de las bicis del taller',notes:'',coach:'',kind:'weekly',days:[0],date:'',done:false,doneDates:[]},
+  {id:uid(),title:'Preparar el material de la semana siguiente',notes:'',coach:'',kind:'weekly',days:[4],date:'',done:false,doneDates:[]}]}
+if(!S||!S.groups)S=seed();
+const ROUTINE=[[0,'Poner entrenamientos Training Peaks'],[0,'Planning competiciones'],[0,'Revisar inscripciones'],[0,'Preparar gimnasio'],[0,'Actualizar SITES'],[1,'Planificar entrenamiento CX'],[1,'Avanzar en el libro Gordo'],[1,'Organizar STAFF fin de semana'],[2,'Revisar tickets Taller y cobrar'],[2,'Pedidos de taller'],[2,'Organizar Local, limpieza y orden'],[2,'Planificar gimnasios'],[3,'Cargar furgonetas finde'],[4,'Planificar semana que viene']];
+if(!S.tasks)S.tasks=[];
+if(!S.routinesV1){
+  S.tasks=S.tasks.filter(t=>!(t.kind==='weekly'&&['Revisar el estado de las bicis del taller','Preparar el material de la semana siguiente'].includes(t.title)));
+  ROUTINE.forEach(([d,title])=>S.tasks.push({id:uid(),title,notes:'',coach:'',kind:'weekly',days:[d],date:'',done:false,doneDates:[]}));
+  S.routinesV1=true;
+}
+const taskOwners=()=>[...S.coaches,{id:'o-direction',name:'Dirección'}];
+const ownerOf=id=>taskOwners().find(o=>o.id===id);
+if(!S.athletes)S.athletes=[];
+if(!S.events)S.events=[];
+S.tasks.forEach(t=>{if(t.coach&&!ownerOf(t.coach))t.coach=''});
+const save=()=>{
+  document.getElementById('organizationStorageStatus').textContent='';
+  window.parent.postMessage({type:'miribilla-organization-save',state:JSON.stringify(S)},portalOrigin);
+};
+
+let tab='trabajo',fCoach='',fGroup='',fSession='',msg='';
+let spDay=(new Date().getDay()+6)%7,sOff=0;
+let calOff=0,calSel='',calShow={tr:true,tk:true,ev:true};
+let wkOff=0,tCoach='';
+let gSel='',aSearch='',aSex='',aYear='',aSort='name',editA=null,impMsg='',impText='',impSex='M',impAuto=true;
+let td={kind:'weekly',days:[0],date:'',coach:'',title:'',notes:''};
+let draft={title:'',group:'',obj:'',ex:[]};
+let sd={days:[1],start:'17:30',end:'19:00',group:'',space:'',coach:'',mode:'weekly',label:''};
+
+const gById=id=>S.groups.find(g=>g.id===id);
+const cById=id=>S.coaches.find(c=>c.id===id);
+const toMin=t=>{const[h,m]=t.split(':').map(Number);return h*60+m};
+const eligible=gid=>S.coaches.filter(c=>c.groups.includes(gid));
+const chip=g=>g?`<span class="chip" style="--c:${g.color}">${esc(g.name)}</span>`:'';
+const opt=(v,l,sel)=>`<option value="${esc(v)}" ${sel?'selected':''}>${esc(l)}</option>`;
+
+const TABS=[['trabajo','Tareas'],['calendario','Calendario'],['sesiones','Sesiones'],['espacios','Espacios'],['entrenadores','Entrenadores'],['grupos','Grupos y coordinadores'],['horario','Horario semanal']];
+
+function viewHorario(){
+  if(!S.groups.length)return `<div class="panel"><p class="empty">Crea primero un grupo en la pestaña Grupos y coordinadores.</p></div>`;
+  if(sd.group!=='__other'&&!gById(sd.group))sd.group=S.groups[0].id;
+  const other=sd.group==='__other',once=sd.mode==='once';
+  const el=other?S.coaches:eligible(sd.group);
+  if(sd.coach&&!el.find(c=>c.id===sd.coach))sd.coach='';
+  const wd=weekDates(sOff),today=dKey(new Date());
+  const form=`<div class="panel"><h2>Añadir franja de entrenamiento</h2>
+  <div class="row" style="margin-bottom:10px"><label style="flex:1 1 280px">Frecuencia<select data-slot="mode" data-rerender>${opt('weekly','Se repite cada semana',!once)}${opt('once',`Solo la semana del ${fmt(wd[0])} al ${fmt(wd[6])}`,once)}</select></label></div>
+  <div class="checks" role="group" aria-label="Días" style="margin:0 0 10px">${DAYS.map((d,i)=>`<label><input type="checkbox" data-day="${i}" ${sd.days.includes(i)?'checked':''}>${d}${once?' '+fmt(wd[i]):''}</label>`).join('')}</div>
+  <div class="row">
+   <label>Inicio<input type="time" data-slot="start" value="${sd.start}"></label>
+   <label>Fin<input type="time" data-slot="end" value="${sd.end}"></label>
+   <label>Grupo<select data-slot="group" data-rerender>${S.groups.map(g=>opt(g.id,g.name,sd.group===g.id)).join('')}${opt('__other','Otros (uso esporádico)',other)}</select></label>
+   ${other?`<label style="flex:2 1 220px">Nombre de la actividad<input data-slot="label" value="${esc(sd.label)}" placeholder="Ej. Charla de seguridad vial"></label>`:''}
+   <label>Espacio<select data-slot="space">${opt('','Por asignar',!sd.space)}${SPACES.map(s=>opt(s,s,sd.space===s)).join('')}</select></label>
+   <label>Entrenador<select data-slot="coach">${opt('','Por asignar',!sd.coach)}${el.map(c=>opt(c.id,c.name,sd.coach===c.id)).join('')}</select></label>
+   <button class="btn" data-act="addSlot">Añadir franja</button>
+  </div>
+  <div class="msg" role="alert">${esc(msg)}</div></div>`;
+  const cols=DAYS.map((d,i)=>{
+    const sl=S.slots.filter(s=>onDay(s,sOff,i)&&(!fCoach||s.coach===fCoach)&&(!fGroup||(fGroup==='__other'?!s.group:s.group===fGroup))).sort((a,b)=>a.start.localeCompare(b.start));
+    return `<div class="day${dKey(wd[i])===today?' today':''}"><h3>${d} <span class="mut" style="font-family:Barlow;font-weight:400">${fmt(wd[i])}</span></h3>${sl.map(s=>{const g=slotGroup(s),c=cById(s.coach),co=cById(g.coord);return `<div class="slot" style="--c:${g.color}"><b>${s.start}–${s.end}</b>${chip(g)}${s.date?' <span class="pill">Solo esta semana</span>':''}<div>${s.space?esc(s.space):'<span class="mut">Espacio por asignar</span>'}</div><div>${c?esc(c.name):'<span class="mut">Entrenador por asignar</span>'}</div>${co?`<div class="mut">Coord.: ${esc(co.name)}</div>`:''}<button class="x" aria-label="Eliminar franja" data-act="delSlot" data-id="${s.id}">×</button></div>`}).join('')||'<span class="mut">Sin entrenamientos</span>'}</div>`}).join('');
+  return form+`<div class="panel"><div class="between" style="margin-bottom:10px"><h2 style="margin:0">Semana</h2><div class="row">
+    <label style="flex:0 1 180px">Grupo<select data-filter="group">${opt('','Todos',!fGroup)}${S.groups.map(g=>opt(g.id,g.name,fGroup===g.id)).join('')}${opt('__other','Otros',fGroup==='__other')}</select></label>
+    <label style="flex:0 1 180px">Entrenador<select data-filter="coach">${opt('','Todos',!fCoach)}${S.coaches.map(c=>opt(c.id,c.name,fCoach===c.id)).join('')}</select></label></div></div>
+    ${schNav()}
+    <div class="days">${cols}</div></div>`;
+}
+
+const SUBS={cadetes:{2012:'1º año',2011:'2º año'},junior:{2010:'1º año',2009:'2º año'}};
+const subOf=a=>(SUBS[(gById(a.group)?.name||'').toLowerCase()]||{})[a.year]||'';
+const AUTO=y=>y>1950&&y<=2008?'sub23':(y>=2009&&y<=2010)?'junior':(y>=2011&&y<=2012)?'cadetes':'';
+const gByName=n=>S.groups.find(g=>g.name.toLowerCase()===n);
+const SMALL=['de','del','la','las','los','y','e'];
+const tcase=s=>s.toLowerCase().split(/(\s+|-)/).map((w,i)=>(!w||/^[\s-]+$/.test(w))?w:((i>0&&SMALL.includes(w))?w:w[0].toUpperCase()+w.slice(1))).join('');
+const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').trim();
+
+function parseAthletes(text,defSex){
+  const lines=text.replace(/^﻿/,'').split(/\r?\n/).filter(l=>l.trim());
+  if(!lines.length)return [];
+  const split=l=>(l.includes('\t')?l.split('\t'):l.includes(';')?l.split(';'):l.split(',')).map(c=>c.trim().replace(/^"|"$/g,''));
+  let cols={nombre:0,apellidos:1,year:2,dni:3,uci:4,sexo:5},start=0;
+  const h=split(lines[0]).map(norm);
+  if(h.some(x=>x==='nombre'||x.startsWith('apellid'))){
+    start=1;cols={};
+    h.forEach((x,i)=>{
+      if(x==='nombre')cols.nombre=i;
+      else if(x.startsWith('apellid'))cols.apellidos=i;
+      else if(x==='ano'||x.startsWith('fecha')||x.startsWith('nac'))cols.year=i;
+      else if(x.startsWith('sex')||x==='genero')cols.sexo=i;
+      else if(x==='dni')cols.dni=i;
+      else if(x==='uci')cols.uci=i;
+      else if(x.startsWith('tel')||x.startsWith('movil')||x==='contacto')cols.phone=i;
+    });
+  }
+  return lines.slice(start).map(l=>{
+    const c=split(l),g=k=>cols[k]===undefined?'':(c[cols[k]]||'');
+    const ym=g('year').match(/(19|20)\d{2}/),sx=norm(g('sexo'));
+    return {name:tcase(g('nombre')),surname:tcase(g('apellidos')),year:ym?+ym[0]:0,
+      sex:/^(f|m|h)/.test(sx)?(sx[0]==='f'?'F':'M'):defSex,dni:g('dni').toUpperCase(),uci:g('uci'),phone:g('phone')};
+  }).filter(a=>a.name||a.surname);
+}
+
+const groupStats=g=>{
+  const L=S.athletes.filter(a=>a.group===g.id),m=L.filter(a=>a.sex==='M').length,f=L.length-m;
+  const hasSubs=!!SUBS[g.name.toLowerCase()];
+  const subs=hasSubs?['1º año','2º año'].map(s=>`${s}: ${L.filter(a=>subOf(a)===s).length}`).join(' y '):'';
+  return {text:`${L.length} deportista${L.length===1?'':'s'} (${m} chico${m===1?'':'s'}, ${f} chica${f===1?'':'s'})`,subs};
+};
+const athForm=a=>`<div class="eform"><label>Nombre<input id="ea-name" value="${esc(a.name)}"></label><label>Apellidos<input id="ea-surname" value="${esc(a.surname)}"></label><label>Año de nacimiento<input id="ea-year" type="number" min="1950" max="2030" value="${a.year||''}"></label><label>Sexo<select id="ea-sex">${opt('M','Chico',a.sex==='M')}${opt('F','Chica',a.sex==='F')}</select></label><label>DNI<input id="ea-dni" value="${esc(a.dni)}"></label><label>Código UCI<input id="ea-uci" value="${esc(a.uci)}"></label><label>Teléfono de contacto<input id="ea-phone" type="tel" value="${esc(a.phone)}"></label><label>Grupo<select id="ea-group">${S.groups.map(g=>opt(g.id,g.name,g.id===a.group)).join('')}</select></label><label style="grid-column:1/-1">Notas<textarea id="ea-notes" rows="2">${esc(a.notes)}</textarea></label><div class="row" style="grid-column:1/-1"><button class="btn" data-act="saveA" data-id="${a.id}">Guardar</button><button class="btn ghost" data-act="cancelA">Cancelar</button>${a.id==='new'?'':`<button class="x" data-act="delA" data-id="${a.id}">Eliminar deportista</button>`}</div></div>`;
+
+function filteredAthletes(){
+  const q=norm(aSearch);
+  const L=S.athletes.filter(a=>a.group===gSel&&(!aSex||a.sex===aSex)&&(!aYear||String(a.year)===aYear)&&(!q||norm(a.name+' '+a.surname+' '+a.dni+' '+a.uci+' '+(a.phone||'')).includes(q)));
+  return L.sort(aSort==='year'?((a,b)=>a.year-b.year||a.surname.localeCompare(b.surname,'es')):((a,b)=>(a.surname+' '+a.name).localeCompare(b.surname+' '+b.name,'es')));
+}
+function rosterList(){
+  const all=S.athletes.filter(a=>a.group===gSel),L=filteredAthletes();
+  const form=editA==='new'?athForm({id:'new',name:'',surname:'',year:'',sex:'M',dni:'',uci:'',phone:'',group:gSel,notes:''}):'';
+  if(!L.length)return form+`<p class="empty">${all.length?'Ningún deportista coincide con la búsqueda o el filtro.':'Este grupo aún no tiene deportistas. Importa un listado o añade uno.'}</p>`;
+  return form+`<p class="mut" style="margin:0 0 6px">Mostrando ${L.length} de ${all.length}</p><div class="tlwrap" style="background:var(--card)"><table class="wk ath"><thead><tr><th>#</th><th>Apellidos y nombre</th><th>Año</th><th>Sexo</th><th>DNI</th><th>UCI</th><th>Teléfono</th><th></th></tr></thead><tbody>${L.map((a,i)=>{const s=subOf(a);return `<tr><td>${i+1}</td><td><b>${esc(a.surname)}</b>, ${esc(a.name)}${a.notes?`<span class="mut" style="display:block">${esc(a.notes)}</span>`:''}</td><td>${a.year||''}${s?` <span class="pill">${s}</span>`:''}</td><td>${a.sex==='F'?'Chica':'Chico'}</td><td>${esc(a.dni)}</td><td>${esc(a.uci)}</td><td>${esc(a.phone)}</td><td><button class="x" data-act="editA" data-id="${a.id}">Editar</button></td></tr>`+(editA===a.id?`<tr><td colspan="8" style="padding:0">${athForm(a)}</td></tr>`:'')}).join('')}</tbody></table></div>`;
+}
+function viewGrupos(){
+  if(!gById(gSel))gSel=(S.groups.find(g=>S.athletes.some(a=>a.group===g.id))||S.groups[0]||{}).id||'';
+  const g=gById(gSel),st=g&&groupStats(g);
+  const chips=S.groups.map(x=>`<button data-sg="${x.id}" aria-pressed="${x.id===gSel}">${esc(x.name)} ${S.athletes.filter(a=>a.group===x.id).length}</button>`).join('');
+  const years=g?[...new Set(S.athletes.filter(a=>a.group===gSel).map(a=>a.year))].sort((a,b)=>b-a):[];
+  const roster=g?`<div class="between"><div>${chip(g)}<div class="mut" style="margin-top:4px">${st.text}${st.subs?`<br>${st.subs}`:''}</div></div><button class="btn" data-act="newA">Añadir deportista</button></div>
+   <div class="row" style="margin:12px 0"><label style="flex:2 1 220px">Buscar<input type="search" data-asearch value="${esc(aSearch)}" placeholder="Nombre, apellidos, DNI, UCI o teléfono"></label>
+   <label>Sexo<select data-asex>${opt('','Todos',!aSex)}${opt('M','Chicos',aSex==='M')}${opt('F','Chicas',aSex==='F')}</select></label>
+   <label>Año<select data-ayear>${opt('','Todos',!aYear)}${years.map(y=>{const sl=(SUBS[g.name.toLowerCase()]||{})[y];return opt(String(y),y+(sl?' ('+sl+')':''),aYear===String(y))}).join('')}</select></label>
+   <label>Ordenar por<select data-asort>${opt('name','Apellidos',aSort==='name')}${opt('year','Año de nacimiento',aSort==='year')}</select></label></div>
+   <div class="msg" role="alert">${esc(msg)}</div><div id="rosterList">${rosterList()}</div>`:'<p class="empty">Crea un grupo para empezar.</p>';
+  const imp=`<div class="panel"><h2>Importar listado</h2>
+   <p class="mut" style="margin-top:0">Sube un archivo CSV o pega las filas desde una hoja de cálculo. Columnas: nombre, apellidos, año, sexo, DNI, UCI y teléfono. La cabecera es opcional; sin cabecera el orden es nombre, apellidos, año, DNI, UCI y, si lo hay, sexo. Si el DNI ya existe, se actualiza el deportista en vez de duplicarlo.</p>
+   <div class="row"><label style="flex:1 1 220px">Archivo<input type="file" accept=".csv,.tsv,.txt" data-impfile></label>
+   <label>Sexo si no viene en el listado<select data-impsex>${opt('M','Chicos',impSex==='M')}${opt('F','Chicas',impSex==='F')}</select></label></div>
+   <label style="margin-top:10px">O pega aquí las filas<textarea data-imp rows="5">${esc(impText)}</textarea></label>
+   <div class="checks"><label><input type="checkbox" data-impauto ${impAuto?'checked':''}>Asignar el grupo por año de nacimiento (2011 y 2012 Cadetes, 2009 y 2010 Junior, 2008 y anteriores Sub23)</label></div>
+   <p class="mut">Los deportistas cuyo año no encaje irán al grupo que estás viendo${g?': '+esc(g.name):''}.</p>
+   <div class="msg" role="status" style="color:var(--ink)">${esc(impMsg)}</div>
+   <button class="btn" data-act="doImport">Importar</button></div>`;
+  return `<div class="panel"><h2>Deportistas</h2><div class="filters" role="group" aria-label="Grupo">${chips}</div>${roster}</div>${imp}${manageGroups()}`;
+}
+function manageGroups(){
+  const block=k=>`<h3 class="sec">${SECTIONS[k]}</h3>`+(S.groups.filter(g=>g.section===k).map(g=>`<div class="item between"><div>${chip(g)}
+    <div class="mut" style="margin-top:4px">Pueden entrenarlo: ${eligible(g.id).map(c=>esc(c.name)).join(', ')||'nadie todavía'}</div></div>
+    <div class="row"><label style="flex:0 1 200px">Coordinador/a<select data-coord="${g.id}">${opt('','Sin coordinador',!g.coord)}${S.coaches.map(c=>opt(c.id,c.name,g.coord===c.id)).join('')}</select></label>
+    <button class="x" data-act="delGroup" data-id="${g.id}">Eliminar</button></div></div>`).join('')||'<p class="empty">Sin grupos.</p>');
+  return `<div class="panel"><h2>Nuevo grupo</h2><div class="row">
+   <label>Nombre<input id="newGroup" placeholder="Ej. Máster"></label>
+   <label>Sección<select id="newSection">${Object.entries(SECTIONS).map(([k,v])=>opt(k,v)).join('')}</select></label>
+   <button class="btn" data-act="addGroup">Añadir grupo</button></div></div>
+  <div class="panel">${block('escuela')}<div style="height:16px"></div>${block('competicion')}</div>`;
+}
+
+function viewEntrenadores(){
+  return `<div class="panel"><h2>Nuevo entrenador</h2><div class="row">
+   <label>Nombre<input id="newCoach" placeholder="Nombre y apellidos"></label>
+   <button class="btn" data-act="addCoach">Añadir entrenador</button></div></div>
+  <div class="panel"><h2>Entrenadores y grupos en los que pueden estar</h2>
+  ${S.coaches.map(c=>{const n=S.slots.filter(s=>s.coach===c.id).length,co=S.groups.filter(g=>g.coord===c.id);return `<div class="item"><div class="between"><div><b>${esc(c.name)}</b> ${co.length?`<span class="mut">· Coordina ${co.map(g=>esc(g.name)).join(', ')}</span>`:''} <span class="mut">· ${n} franja${n===1?'':'s'} asignada${n===1?'':'s'}</span></div><button class="x" data-act="delCoach" data-id="${c.id}">Eliminar</button></div>
+   <div class="checks">${S.groups.map(g=>`<label><input type="checkbox" data-cg="${c.id}|${g.id}" ${c.groups.includes(g.id)?'checked':''}>${chip(g)}</label>`).join('')}</div></div>`}).join('')||'<p class="empty">Aún no hay entrenadores.</p>'}</div>`;
+}
+
+function viewSesiones(){
+  if(!gById(draft.group))draft.group=S.groups[0]?.id||'';
+  const list=S.sessions.filter(s=>!fSession||s.group===fSession);
+  const tot=draft.ex.reduce((a,e)=>a+e.min,0);
+  return `<div class="panel"><h2>Nueva sesión</h2>
+   <div class="row"><label style="flex:2 1 220px">Título<input data-d="title" value="${esc(draft.title)}" placeholder="Ej. Rodar en grupo"></label>
+   <label>Grupo / nivel<select data-d="group">${S.groups.map(g=>opt(g.id,g.name,draft.group===g.id)).join('')}</select></label></div>
+   <label style="margin-top:10px">Objetivo<input data-d="obj" value="${esc(draft.obj)}" placeholder="Qué se quiere conseguir"></label>
+   <h3 style="margin:14px 0 6px">Ejercicios ${tot?`<span class="mut" style="font-family:Barlow">· ${tot} min</span>`:''}</h3>
+   ${draft.ex.map((e,i)=>`<div class="draft-ex"><span><b>${esc(e.name)}</b> · ${e.min} min${e.desc?' — '+esc(e.desc):''}</span><button class="x" data-act="delDraftEx" data-i="${i}" aria-label="Quitar ejercicio">×</button></div>`).join('')}
+   <div class="row" style="margin-top:10px">
+    <label style="flex:2 1 160px">Ejercicio<input id="exName" placeholder="Nombre"></label>
+    <label style="flex:0 1 90px">Minutos<input id="exMin" type="number" min="1" value="10"></label>
+    <label style="flex:3 1 220px">Descripción<input id="exDesc" placeholder="Cómo se hace"></label>
+    <button class="btn ghost" data-act="addDraftEx">Añadir ejercicio</button></div>
+   <div class="msg" role="alert">${esc(msg)}</div>
+   <button class="btn" data-act="saveSession">Guardar sesión</button></div>
+  <div class="filters" role="group" aria-label="Filtrar por grupo"><button data-sf="" aria-pressed="${!fSession}">Todos</button>${S.groups.map(g=>`<button data-sf="${g.id}" aria-pressed="${fSession===g.id}">${esc(g.name)}</button>`).join('')}</div>
+  ${list.map(s=>{const g=gById(s.group),t=s.ex.reduce((a,e)=>a+e.min,0);return `<article class="sess" style="--c:${g?.color}"><div class="between"><div>${chip(g)}<h3>${esc(s.title)}</h3><div class="mut">${esc(s.obj)}${s.obj?' · ':''}${t} min en total</div></div><button class="x" data-act="delSession" data-id="${s.id}" aria-label="Eliminar sesión">×</button></div>
+   ${s.ex.map(e=>`<div class="ex"><span><b>${esc(e.name)}</b></span><span>${e.min} min</span>${e.desc?`<p>${esc(e.desc)}</p>`:''}</div>`).join('')}</article>`}).join('')||'<p class="empty">No hay sesiones para este grupo. Crea la primera arriba.</p>'}`;
+}
+
+const overlap=(a,b)=>a.id!==b.id&&a.day===b.day&&(!a.date||!b.date||a.date===b.date)&&toMin(a.start)<toMin(b.end)&&toMin(b.start)<toMin(a.end);
+const slotGroup=s=>s.group?(gById(s.group)||{id:'',name:'Grupo eliminado',color:'#6b7a88',coord:''}):{id:'',name:s.label||'Otros',color:'#6b7a88',coord:''};
+const slotCoaches=s=>s.group?eligible(s.group):S.coaches;
+const inWeek=(s,off)=>!s.date||weekDates(off).some(d=>dKey(d)===s.date);
+const onDay=(s,off,i)=>s.date?s.date===dKey(weekDates(off)[i]):s.day===i;
+const schNav=()=>{const wd=weekDates(sOff);return `<div class="row" style="margin-bottom:12px"><button class="btn ghost" data-act="schPrev">Semana anterior</button><button class="btn ghost" data-act="schNow">Esta semana</button><button class="btn ghost" data-act="schNext">Semana siguiente</button><span class="mut">Semana del ${fmt(wd[0])} al ${fmt(wd[6])}${sOff===0?' (actual)':''}</span></div>`};
+function layoutLanes(list){
+  const items=[...list].sort((a,b)=>toMin(a.start)-toMin(b.start)||toMin(a.end)-toMin(b.end));
+  const out=[];let cl=[],end=0;
+  const flush=()=>{const n=Math.max(1,...cl.map(c=>c.lane+1));cl.forEach(c=>c.n=n);out.push(...cl);cl=[]};
+  items.forEach(s=>{
+    if(cl.length&&toMin(s.start)>=end)flush();
+    if(!cl.length)end=0;
+    const used=cl.filter(c=>toMin(c.s.end)>toMin(s.start)).map(c=>c.lane);
+    let l=0;while(used.includes(l))l++;
+    cl.push({s,lane:l});end=Math.max(end,toMin(s.end));
+  });
+  if(cl.length)flush();
+  return out;
+}
+function viewEspacios(){
+  const HOUR=72;
+  const wd=weekDates(sOff),wkS=S.slots.filter(s=>inWeek(s,sOff)),day=wkS.filter(s=>onDay(s,sOff,spDay));
+  let t0=16*60,t1=21*60;
+  day.forEach(s=>{t0=Math.min(t0,Math.floor(toMin(s.start)/60)*60);t1=Math.max(t1,Math.ceil(toMin(s.end)/60)*60)});
+  const H=(t1-t0)/60*HOUR;
+  const bad=new Set();
+  wkS.forEach(a=>{if(a.space)wkS.forEach(b=>{if(a.space===b.space&&overlap(a,b))bad.add(a.id)})});
+  const pairs=[];
+  wkS.forEach((a,i)=>wkS.slice(i+1).forEach(b=>{
+    if(a.space&&a.space===b.space&&overlap(a,b))
+      pairs.push(`${DAYS[a.day]}, ${a.space}: ${slotGroup(a).name} y ${slotGroup(b).name} coinciden.`)}));
+  const spaceCols=[...SPACES,''];
+  const labels=[];for(let m=t0;m<t1;m+=60)labels.push(`<span style="top:${(m-t0)/60*HOUR+2}px">${String(m/60).padStart(2,'0')}:00</span>`);
+  const colHtml=sp=>{
+    const items=layoutLanes(day.filter(s=>(s.space||'')===sp));
+    return `<div class="tlc" style="height:${H}px">${items.map(({s,lane,n})=>{
+      const g=slotGroup(s),el=slotCoaches(s),top=(toMin(s.start)-t0)/60*HOUR,h=(toMin(s.end)-toMin(s.start))/60*HOUR-2;
+      return `<div class="blk${bad.has(s.id)?' bad':''}" style="--c:${g?.color};top:${top}px;height:${h}px;left:calc(${lane/n*100}% + 2px);width:calc(${100/n}% - 4px)">
+        <b>${s.start}–${s.end}</b>${esc(g.name)}${s.date?' (puntual)':''}
+        <select data-aspace="${s.id}" aria-label="Espacio de ${esc(g?.name)}">${opt('','Sin espacio',!s.space)}${SPACES.map(x=>opt(x,x,s.space===x)).join('')}</select>
+        <select data-acoach="${s.id}" aria-label="Entrenador de ${esc(g?.name)}">${opt('','Sin entrenador',!s.coach)}${el.map(c=>opt(c.id,c.name,s.coach===c.id)).join('')}</select>
+      </div>`}).join('')}</div>`};
+  const timeline=`<div class="tlwrap"><div class="tl" style="--hh:${HOUR}px">
+    <div class="tlh" style="border-left:0"></div>${spaceCols.map(sp=>`<div class="tlh${sp?'':' un'}">${sp||'Por asignar'}</div>`).join('')}
+    <div class="tlt" style="height:${H}px">${labels.join('')}</div>${spaceCols.map(colHtml).join('')}</div></div>`;
+  const wkRows=spaceCols.map(sp=>`<tr><th scope="row">${sp||'Por asignar'}</th>${DAYS.map((d,i)=>{
+    const sl=wkS.filter(s=>onDay(s,sOff,i)&&(s.space||'')===sp).sort((a,b)=>a.start.localeCompare(b.start));
+    return `<td>${sl.map(s=>{const g=slotGroup(s);return `<span class="ln"><span class="chip" style="--c:${g?.color}">${esc(g?.name)}</span> ${s.start}–${s.end}${s.coach?' · '+esc(cById(s.coach)?.name):''}</span>`}).join('')}</td>`}).join('')}</tr>`).join('');
+  const nDay=day.length;
+  return `<div class="panel"><h2>Quién ocupa cada espacio</h2>
+   ${schNav()}
+   <div class="dtabs" role="group" aria-label="Día de la semana">${DAYS.map((d,i)=>`<button data-sd="${i}" aria-pressed="${spDay===i}">${d} ${fmt(wd[i])}</button>`).join('')}</div>
+   <div class="msg" role="alert">${esc(msg)}</div>
+   ${pairs.length?`<div class="warn" role="status"><b>Hay espacios con dos grupos a la vez:</b>${pairs.map(p=>`<p>${esc(p)}</p>`).join('')}</div>`:''}
+   ${nDay?'':'<p class="empty">No hay entrenamientos este día. Añádelos en Horario semanal.</p>'}
+   ${timeline}
+   <p class="mut" style="margin-top:8px">Cambia el espacio o el entrenador de cada bloque con sus desplegables. Los bloques con borde rojo comparten espacio a la misma hora.</p></div>
+  <div class="panel"><h2>Resumen de la semana del ${fmt(wd[0])} al ${fmt(wd[6])}</h2><div class="tlwrap" style="background:var(--card)"><table class="wk"><thead><tr><th></th>${DAYS.map(d=>`<th>${d}</th>`).join('')}</tr></thead><tbody>${wkRows}</tbody></table></div></div>`;
+}
+const pad=n=>String(n).padStart(2,'0');
+const dKey=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+function weekDates(off){const n=new Date(),m=new Date(n.getFullYear(),n.getMonth(),n.getDate()-((n.getDay()+6)%7)+off*7);return DAYS.map((_,i)=>new Date(m.getFullYear(),m.getMonth(),m.getDate()+i))}
+const fmt=d=>`${d.getDate()}/${d.getMonth()+1}`;
+const fmtKey=k=>{const[y,m,d]=k.split('-');return `${+d}/${+m}/${y}`};
+function taskLine(t,key,extra=''){
+  const done=t.kind==='once'?t.done:t.doneDates.includes(key),c=ownerOf(t.coach);
+  return `<div class="tk${done?' done':''}"><label><input type="checkbox" data-done="${t.id}|${key}" ${done?'checked':''}><span><b>${esc(t.title)}</b>${c?`<span class="mut"> · ${esc(c.name)}</span>`:''}${extra}${t.notes?`<span class="mut" style="display:block">${esc(t.notes)}</span>`:''}</span></label>${t.kind==='once'?`<button class="x" data-act="delTask" data-id="${t.id}" aria-label="Eliminar tarea">×</button>`:''}</div>`}
+function pendingToday(){
+  const k=dKey(new Date()),i=(new Date().getDay()+6)%7;
+  return S.tasks.filter(t=>t.kind==='weekly'?(t.days.includes(i)&&!t.doneDates.includes(k)):(!t.done&&t.date&&t.date<=k));
+}
+function viewTrabajo(){
+  const T=S.tasks.filter(t=>!tCoach||t.coach===tCoach);
+  const wd=weekDates(wkOff),today=dKey(new Date());
+  const form=`<div class="panel"><h2>Nueva tarea</h2>
+   <div class="row"><label style="flex:3 1 260px">Tarea<input data-td="title" value="${esc(td.title)}" placeholder="Ej. Pedir los dorsales"></label>
+   <label>Tipo<select data-td="kind">${opt('weekly','Se repite cada semana',td.kind==='weekly')}${opt('once','Puntual',td.kind==='once')}</select></label>
+   ${td.kind==='once'?`<label>Fecha (opcional)<input type="date" data-td="date" value="${td.date}"></label>`:''}
+   <label>Responsable<select data-td="coach">${opt('','Sin asignar',!td.coach)}${taskOwners().map(c=>opt(c.id,c.name,td.coach===c.id)).join('')}</select></label></div>
+   ${td.kind==='weekly'?`<div class="checks" role="group" aria-label="Días en que se repite">${DAYS.map((d,i)=>`<label><input type="checkbox" data-tday="${i}" ${td.days.includes(i)?'checked':''}>${d}</label>`).join('')}</div>`:''}
+   <label style="margin-top:10px">Notas (opcional)<input data-td="notes" value="${esc(td.notes)}" placeholder="Detalles que haya que recordar"></label>
+   <div class="msg" role="alert">${esc(msg)}</div>
+   <button class="btn" data-act="addTask">Añadir tarea</button></div>`;
+  const cols=wd.map((d,i)=>{const k=dKey(d),list=T.filter(t=>t.kind==='weekly'?t.days.includes(i):t.date===k);
+    return `<div class="day${k===today?' today':''}"><h3>${DAYS[i]} <span class="mut" style="font-family:Barlow;font-weight:400">${fmt(d)}</span></h3>${list.map(t=>taskLine(t,k)).join('')||'<span class="mut">Sin tareas</span>'}</div>`}).join('');
+  const week=`<div class="panel"><div class="between" style="margin-bottom:10px"><h2 style="margin:0">Semana del ${fmt(wd[0])} al ${fmt(wd[6])}</h2><div class="row">
+   <label style="flex:0 1 170px">Responsable<select data-tfilter>${opt('','Todos',!tCoach)}${taskOwners().map(c=>opt(c.id,c.name,tCoach===c.id)).join('')}</select></label>
+   <button class="btn ghost" data-act="wkPrev">Anterior</button><button class="btn ghost" data-act="wkNow">Esta semana</button><button class="btn ghost" data-act="wkNext">Siguiente</button></div></div>
+   <div class="days" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr))">${cols}</div></div>`;
+  const pend=T.filter(t=>t.kind==='once'&&(!t.date||(t.date<today&&!t.done)));
+  const pending=`<div class="panel"><div class="between" style="margin-bottom:10px"><h2 style="margin:0">Pendientes sin fecha o atrasadas</h2><button class="btn ghost" data-act="clearDone">Quitar las hechas</button></div>
+   ${pend.map(t=>taskLine(t,t.date||'',t.date?`<span class="mut"> · era para el ${fmtKey(t.date)}</span>`:'')).join('')||'<p class="empty">No hay tareas pendientes sin fecha. Añade una puntual arriba.</p>'}</div>`;
+  const weekly=T.filter(t=>t.kind==='weekly');
+  const series=`<div class="panel"><h2>Tareas que se repiten cada semana</h2>${weekly.map(t=>{const c=ownerOf(t.coach);return `<div class="item between"><div><b>${esc(t.title)}</b><div class="mut">${t.days.map(i=>`<span class="pill">${DAYS[i]}</span>`).join('')}${c?esc(c.name):'Sin responsable'}</div></div><button class="x" data-act="delWeekly" data-id="${t.id}">Eliminar</button></div>`}).join('')||'<p class="empty">No hay tareas semanales.</p>'}</div>`;
+  const pt=pendingToday(),tk=dKey(new Date()),ti=(new Date().getDay()+6)%7;
+  const alertHtml=pt.length
+    ?`<section class="alert" role="status"><h2>Hoy ${DAYS[ti].toLowerCase()}: ${pt.length} tarea${pt.length===1?'':'s'} por hacer</h2>${pt.map(t=>taskLine(t,t.kind==='weekly'?tk:t.date,t.kind==='once'&&t.date<tk?`<span class="mut"> · era para el ${fmtKey(t.date)}</span>`:'')).join('')}</section>`
+    :`<section class="alert ok" role="status"><h2>Hoy ${DAYS[ti].toLowerCase()}: todo hecho</h2><p class="mut" style="margin:0">No quedan tareas para hoy.</p></section>`;
+  return alertHtml+form+week+pending+series;
+}
+const MONTHS=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const EVT={comp:{n:'Competición',c:'#c23b2b'},reu:{n:'Reunión',c:'#1f6fb0'},otro:{n:'Otro',c:'#5b6b79'}};
+const evOn=k=>S.events.filter(e=>e.date<=k&&k<=(e.endDate||e.date));
+const trOn=(k,i)=>S.slots.filter(s=>s.date?s.date===k:s.day===i).sort((a,b)=>a.start.localeCompare(b.start));
+const tkOn=(k,i)=>S.tasks.filter(t=>t.kind==='weekly'?t.days.includes(i):t.date===k);
+const plural=(n,a,b)=>`${n} ${n===1?a:b}`;
+function viewCalendario(){
+  const now=new Date(),today=dKey(now),first=new Date(now.getFullYear(),now.getMonth()+calOff,1);
+  const lead=(first.getDay()+6)%7,dim=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),rows=Math.ceil((lead+dim)/7);
+  if(!calSel)calSel=today;
+  const cells=[];
+  for(let n=0;n<rows*7;n++){
+    const d=new Date(first.getFullYear(),first.getMonth(),1-lead+n),k=dKey(d),i=n%7,out=d.getMonth()!==first.getMonth();
+    const ev=calShow.ev?evOn(k):[],tr=calShow.tr?trOn(k,i):[],tk=calShow.tk?tkOn(k,i):[];
+    cells.push(`<button class="cal${out?' out':''}${k===today?' today':''}${k===calSel?' sel':''}" data-cd="${k}" aria-label="${d.getDate()} de ${MONTHS[d.getMonth()]}" aria-pressed="${k===calSel}"><span class="cn">${d.getDate()}</span>${ev.slice(0,2).map(e=>`<span class="ce" style="--c:${(EVT[e.type]||EVT.otro).c}">${esc(e.title)}</span>`).join('')}${ev.length>2?`<span class="cm">+${ev.length-2} más</span>`:''}${tr.length?`<span class="cm"><i class="dot"></i>${tr.length}<span class="lbl"> ${tr.length===1?'entreno':'entrenos'}</span></span>`:''}${tk.length?`<span class="cm"><i class="dot tkd"></i>${tk.length}<span class="lbl"> ${tk.length===1?'tarea':'tareas'}</span></span>`:''}</button>`);
+  }
+  const [y,m,dd]=calSel.split('-').map(Number),sel=new Date(y,m-1,dd),si=(sel.getDay()+6)%7;
+  const ev=evOn(calSel),tr=trOn(calSel,si),tk=tkOn(calSel,si);
+  const detail=`<div class="panel"><h2>${DAYS[si]} ${dd} de ${MONTHS[m-1]}</h2>
+   <h3 class="sec">Eventos</h3>${ev.map(e=>`<div class="tk"><div><span class="chip" style="--c:${(EVT[e.type]||EVT.otro).c}">${(EVT[e.type]||EVT.otro).n}</span> <b>${esc(e.title)}</b>${e.endDate?`<span class="mut"> del ${fmtKey(e.date)} al ${fmtKey(e.endDate)}</span>`:''}${e.notes?`<span class="mut" style="display:block">${esc(e.notes)}</span>`:''}</div><button class="x" data-act="delEvt" data-id="${e.id}" aria-label="Eliminar evento">×</button></div>`).join('')||'<p class="empty">Sin eventos este día.</p>'}
+   <h3 class="sec" style="margin-top:14px">Entrenamientos</h3>${tr.map(s=>{const g=slotGroup(s),c=cById(s.coach);return `<div class="slot" style="--c:${g.color}"><b>${s.start}–${s.end}</b>${chip(g)}${s.date?' <span class="pill">Solo esta semana</span>':''}<div>${s.space?esc(s.space):'<span class="mut">Espacio por asignar</span>'}</div><div>${c?esc(c.name):'<span class="mut">Entrenador por asignar</span>'}</div></div>`}).join('')||'<p class="empty">Sin entrenamientos este día.</p>'}
+   <h3 class="sec" style="margin-top:14px">Tareas</h3>${tk.map(t=>taskLine(t,calSel)).join('')||'<p class="empty">Sin tareas este día.</p>'}
+   <h3 class="sec" style="margin-top:14px">Añadir evento el ${dd}/${m}</h3>
+   <div class="row"><label style="flex:2 1 220px">Título<input id="ev-title" placeholder="Ej. Copa de Euskadi de ciclocross"></label>
+   <label>Tipo<select id="ev-type">${Object.entries(EVT).map(([k,v])=>opt(k,v.n)).join('')}</select></label>
+   <label>Hasta (si dura varios días)<input id="ev-end" type="date" min="${calSel}"></label></div>
+   <label style="margin-top:10px">Notas (opcional)<input id="ev-notes" placeholder="Lugar, hora de salida, quién va..."></label>
+   <div class="msg" role="alert">${esc(msg)}</div><button class="btn" data-act="addEvt">Añadir evento</button></div>`;
+  return `<div class="panel"><div class="between" style="margin-bottom:12px"><h2 style="margin:0;text-transform:capitalize">${MONTHS[first.getMonth()]} ${first.getFullYear()}</h2><div class="row"><button class="btn ghost" data-act="calPrev">Mes anterior</button><button class="btn ghost" data-act="calNow">Hoy</button><button class="btn ghost" data-act="calNext">Mes siguiente</button></div></div>
+   <div class="checks" role="group" aria-label="Qué mostrar" style="margin:0 0 10px"><label><input type="checkbox" data-cshow="ev" ${calShow.ev?'checked':''}>Eventos</label><label><input type="checkbox" data-cshow="tr" ${calShow.tr?'checked':''}><i class="dot"></i>Entrenamientos</label><label><input type="checkbox" data-cshow="tk" ${calShow.tk?'checked':''}><i class="dot tkd"></i>Tareas</label></div>
+   <div class="calh" aria-hidden="true">${DAYS.map(d=>`<span>${d.slice(0,3)}</span>`).join('')}</div><div class="calg">${cells.join('')}</div></div>${detail}`;
+}
+function render(){
+  document.getElementById('nav').innerHTML=TABS.map(([k,l])=>`<button data-tab="${k}" aria-current="${tab===k}">${l}${k==='trabajo'&&pendingToday().length?`<span class="nbadge" aria-label="${pendingToday().length} tareas de hoy sin hacer">${pendingToday().length}</span>`:''}</button>`).join('');
+  document.getElementById('app').innerHTML={horario:viewHorario,espacios:viewEspacios,trabajo:viewTrabajo,calendario:viewCalendario,grupos:viewGrupos,entrenadores:viewEntrenadores,sesiones:viewSesiones}[tab]();
+}
+const go=()=>{msg='';save();render()};
+const fail=m=>{msg=m;render()};
+
+document.addEventListener('click',e=>{
+  const t=e.target.closest('[data-tab],[data-act],[data-sf],[data-sd],[data-sg],[data-cd]');if(!t)return;
+  if(t.dataset.tab){tab=t.dataset.tab;msg='';return render()}
+  if(t.dataset.sd!==undefined){spDay=+t.dataset.sd;msg='';return render()}
+  if(t.dataset.cd!==undefined){calSel=t.dataset.cd;msg='';render();const b=document.querySelector(`[data-cd="${calSel}"]`);if(b)b.focus();return}
+  if(t.dataset.sg!==undefined){gSel=t.dataset.sg;aSearch='';aSex='';aYear='';editA=null;msg='';return render()}
+  if(t.dataset.sf!==undefined&&!t.dataset.act){fSession=t.dataset.sf;return render()}
+  const a=t.dataset.act,id=t.dataset.id;
+  if(a==='addSlot'){
+    if(!sd.days.length)return fail('Marca al menos un día.');
+    if(toMin(sd.end)<=toMin(sd.start))return fail('La hora de fin debe ser posterior a la de inicio.');
+    const other=sd.group==='__other';
+    if(other&&!sd.label.trim())return fail('Escribe el nombre de la actividad en "Otros".');
+    const wd=weekDates(sOff);
+    const cands=sd.days.map(d=>({id:'new',day:d,start:sd.start,end:sd.end,group:other?'':sd.group,label:other?sd.label.trim():'',coach:sd.coach,space:sd.space,date:sd.mode==='once'?dKey(wd[d]):''}));
+    if(sd.coach)for(const c of cands){
+      const clash=S.slots.find(s=>s.coach===sd.coach&&overlap(c,s));
+      if(clash)return fail(`${cById(sd.coach).name} ya tiene ${slotGroup(clash).name} el ${DAYS[c.day].toLowerCase()} de ${clash.start} a ${clash.end}.`);
+    }
+    cands.forEach(c=>S.slots.push({...c,id:uid()}));
+    if(other)sd.label='';
+    go();
+  }
+  if(a==='delSlot'){const s=S.slots.find(x=>x.id===id);if(s&&(s.date||confirm('Es una franja semanal: se eliminará de todas las semanas. ¿Continuar?'))){S.slots=S.slots.filter(x=>x.id!==id);go()}}
+  if(a==='calPrev'){calOff--;render()}
+  if(a==='calNext'){calOff++;render()}
+  if(a==='calNow'){calOff=0;calSel=dKey(new Date());render()}
+  if(a==='delEvt'&&confirm('¿Eliminar el evento?')){S.events=S.events.filter(x=>x.id!==id);go()}
+  if(a==='addEvt'){
+    const title=document.getElementById('ev-title').value.trim(),end=document.getElementById('ev-end').value;
+    if(!title)return fail('Escribe el título del evento.');
+    if(end&&end<calSel)return fail('La fecha final no puede ser anterior al día elegido.');
+    S.events.push({id:uid(),title,date:calSel,endDate:end&&end!==calSel?end:'',type:document.getElementById('ev-type').value,notes:document.getElementById('ev-notes').value.trim()});go();
+  }
+  if(a==='schPrev'){sOff--;render()}
+  if(a==='schNext'){sOff++;render()}
+  if(a==='schNow'){sOff=0;render()}
+  if(a==='addCoach'){const n=document.getElementById('newCoach').value.trim();if(n){S.coaches.push({id:uid(),name:n,groups:[]});go()}}
+  if(a==='delCoach'&&confirm('¿Eliminar entrenador? Sus franjas quedarán por asignar.')){S.coaches=S.coaches.filter(c=>c.id!==id);S.slots.forEach(s=>{if(s.coach===id)s.coach=''});S.groups.forEach(g=>{if(g.coord===id)g.coord=''});go()}
+  if(a==='addGroup'){const n=document.getElementById('newGroup').value.trim();if(n){S.groups.push({id:uid(),name:n,section:document.getElementById('newSection').value,coord:'',color:COLORS[S.groups.length%COLORS.length]});go()}}
+  if(a==='delGroup'&&confirm('¿Eliminar el grupo con sus franjas, sesiones y deportistas?')){S.athletes=S.athletes.filter(x=>x.group!==id);S.groups=S.groups.filter(g=>g.id!==id);S.slots=S.slots.filter(s=>s.group!==id);S.sessions=S.sessions.filter(s=>s.group!==id);S.coaches.forEach(c=>c.groups=c.groups.filter(x=>x!==id));go()}
+  if(a==='addDraftEx'){
+    const n=document.getElementById('exName').value.trim();
+    if(!n)return fail('Escribe el nombre del ejercicio.');
+    draft.ex.push({name:n,min:Math.max(1,+document.getElementById('exMin').value||10),desc:document.getElementById('exDesc').value.trim()});msg='';render();
+  }
+  if(a==='delDraftEx'){draft.ex.splice(+t.dataset.i,1);render()}
+  if(a==='saveSession'){
+    if(!draft.title.trim())return fail('Ponle un título a la sesión.');
+    if(!draft.ex.length)return fail('Añade al menos un ejercicio.');
+    S.sessions.unshift({id:uid(),title:draft.title.trim(),group:draft.group,obj:draft.obj.trim(),ex:draft.ex});
+    draft={title:'',group:draft.group,obj:'',ex:[]};fSession='';go();
+  }
+  if(a==='delSession'&&confirm('¿Eliminar la sesión?')){S.sessions=S.sessions.filter(s=>s.id!==id);go()}
+  if(a==='wkPrev'){wkOff--;render()}
+  if(a==='wkNext'){wkOff++;render()}
+  if(a==='wkNow'){wkOff=0;render()}
+  if(a==='addTask'){
+    if(!td.title.trim())return fail('Escribe qué hay que hacer.');
+    if(td.kind==='weekly'&&!td.days.length)return fail('Marca al menos un día de la semana.');
+    S.tasks.push({id:uid(),title:td.title.trim(),notes:td.notes.trim(),coach:td.coach,kind:td.kind,days:td.kind==='weekly'?[...td.days].sort():[],date:td.kind==='once'?td.date:'',done:false,doneDates:[]});
+    td.title='';td.notes='';go();
+  }
+  if(a==='delTask'){S.tasks=S.tasks.filter(x=>x.id!==id);go()}
+  if(a==='newA'){editA='new';msg='';render()}
+  if(a==='editA'){editA=id;msg='';render()}
+  if(a==='cancelA'){editA=null;msg='';render()}
+  if(a==='delA'&&confirm('¿Eliminar a este deportista?')){S.athletes=S.athletes.filter(x=>x.id!==id);editA=null;go()}
+  if(a==='saveA'){
+    const f=k=>document.getElementById('ea-'+k).value.trim();
+    const rec={name:f('name'),surname:f('surname'),year:+f('year')||0,sex:f('sex'),dni:f('dni').toUpperCase(),uci:f('uci'),phone:f('phone'),group:f('group'),notes:f('notes')};
+    if(!rec.name&&!rec.surname)return fail('Escribe al menos el nombre o los apellidos.');
+    if(id==='new')S.athletes.push({id:uid(),...rec});
+    else Object.assign(S.athletes.find(x=>x.id===id),rec);
+    editA=null;go();
+  }
+  if(a==='doImport'){
+    const list=parseAthletes(impText,impSex);
+    if(!list.length){impMsg='No he encontrado deportistas. Pega las filas o sube un archivo CSV.';return render()}
+    let add=0,upd=0;
+    list.forEach(p=>{
+      const gn=impAuto&&p.year?AUTO(p.year):'';
+      const gid=(gn&&gByName(gn)?.id)||gSel;
+      const ex=S.athletes.find(x=>p.dni?x.dni===p.dni:(x.name===p.name&&x.surname===p.surname&&x.year===p.year));
+      if(ex){Object.assign(ex,{name:p.name,surname:p.surname,year:p.year||ex.year,sex:p.sex,uci:p.uci||ex.uci,phone:p.phone||ex.phone||'',group:gid});upd++}
+      else{S.athletes.push({id:uid(),...p,group:gid,notes:''});add++}
+    });
+    impMsg=`Importados ${add} deportista${add===1?'':'s'} nuevo${add===1?'':'s'}${upd?` y actualizados ${upd}`:''}.`;impText='';save();render();
+  }
+  if(a==='delWeekly'&&confirm('¿Eliminar esta tarea semanal? Dejará de aparecer todas las semanas.')){S.tasks=S.tasks.filter(x=>x.id!==id);go()}
+  if(a==='clearDone'&&confirm('¿Eliminar las tareas puntuales ya hechas?')){S.tasks=S.tasks.filter(x=>!(x.kind==='once'&&x.done));go()}
+});
+document.addEventListener('change',e=>{
+  const t=e.target,d=t.dataset;
+  if(d.slot){sd[d.slot]=t.value;if(t.hasAttribute('data-rerender'))render()}
+  if(d.aspace!==undefined){const s=S.slots.find(x=>x.id===d.aspace);s.space=t.value;msg='';save();render()}
+  if(d.acoach!==undefined){
+    const s=S.slots.find(x=>x.id===d.acoach);
+    const clash=t.value&&S.slots.find(o=>o.coach===t.value&&overlap(o,s));
+    if(clash){msg=`${cById(t.value).name} ya está con ${slotGroup(clash).name} el ${DAYS[s.day].toLowerCase()} de ${clash.start} a ${clash.end}.`;return render()}
+    s.coach=t.value;msg='';save();render();
+  }
+  if(d.day!==undefined){const n=+d.day;sd.days=t.checked?[...new Set([...sd.days,n])]:sd.days.filter(x=>x!==n)}
+  if(d.filter==='coach'){fCoach=t.value;render()}
+  if(d.filter==='group'){fGroup=t.value;render()}
+  if(d.coord){const g=gById(d.coord);g.coord=t.value;
+    if(t.value){const c=cById(t.value);if(!c.groups.includes(g.id))c.groups.push(g.id)}
+    save();render()}
+  if(d.cg){const[c,g]=d.cg.split('|'),co=cById(c);
+    if(t.checked)co.groups=[...new Set([...co.groups,g])];
+    else{co.groups=co.groups.filter(x=>x!==g);S.slots.forEach(s=>{if(s.coach===c&&s.group===g)s.coach=''});if(gById(g).coord===c)gById(g).coord=''}
+    save();render()}
+  if(d.d==='group')draft.group=t.value;
+  if(d.td){td[d.td]=t.value;if(d.td==='kind')render()}
+  if(d.cshow!==undefined){calShow[d.cshow]=t.checked;render()}
+  if(d.asex!==undefined){aSex=t.value;render()}
+  if(d.ayear!==undefined){aYear=t.value;render()}
+  if(d.asort!==undefined){aSort=t.value;render()}
+  if(d.impsex!==undefined)impSex=t.value;
+  if(d.impauto!==undefined)impAuto=t.checked;
+  if(d.impfile!==undefined){const f=t.files[0];if(f){const r=new FileReader();r.onload=()=>{impText=String(r.result);impMsg='';render()};r.readAsText(f)}}
+  if(d.tday!==undefined){const n=+d.tday;td.days=t.checked?[...new Set([...td.days,n])]:td.days.filter(x=>x!==n)}
+  if(d.tfilter!==undefined){tCoach=t.value;render()}
+  if(d.done!==undefined){
+    const[id,key]=d.done.split('|'),k=S.tasks.find(x=>x.id===id);
+    if(k.kind==='once')k.done=t.checked;
+    else k.doneDates=t.checked?[...new Set([...k.doneDates,key])]:k.doneDates.filter(x=>x!==key);
+    save();render();
+  }
+});
+document.addEventListener('input',e=>{const t=e.target;if(t.dataset.d==='title'||t.dataset.d==='obj')draft[t.dataset.d]=t.value;if(t.dataset.td==='title'||t.dataset.td==='notes')td[t.dataset.td]=t.value;
+  if(t.dataset.asearch!==undefined){aSearch=t.value;const el=document.getElementById('rosterList');if(el)el.innerHTML=rosterList()}
+  if(t.dataset.imp!==undefined)impText=t.value});
+render();
+}
+</script>
+</body>
+</html>
