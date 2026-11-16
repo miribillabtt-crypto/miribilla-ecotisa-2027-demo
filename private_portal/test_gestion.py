@@ -3,7 +3,7 @@ from test_security import env
 from server import User
 from werkzeug.security import generate_password_hash
 
-def test_gestion(env,monkeypatch):
+def test_gestion(env):
     app,_,login,_=env
     with app.extensions['db_sessions'].begin() as db:
         db.add(User(id='shared-direction',email='direccion',name='Dirección',role='director',
@@ -21,17 +21,25 @@ def test_gestion(env,monkeypatch):
         return {'file':(io.BytesIO(b'%PDF-1.7\n%%EOF'),'factura.pdf'),'supplier':'Proveedor',
                 'reference':'123','date':'2026-11-09','base':'4959','tax':'1041','amount':'6000'}
     mail='/api/gestion/mail-intake'
-    token='a'*40
-    assert app.test_client().post(mail,data=upload_data()).status_code==401
-    monkeypatch.setenv('GESTION_MAIL_TOKEN',token)
     mailer=app.test_client()
-    assert mailer.post(mail,data=upload_data(),headers={'Authorization':'Bearer incorrect'}).status_code==401
-    sent=mailer.post(mail,data=upload_data(),headers={'Authorization':'Bearer '+token})
+    assert mailer.post(mail,data=upload_data()).status_code==401
+    key=browser.post('/api/gestion/mail-key',json={'account':'miribillabtt@gmail.com'},headers=headers)
+    mail_headers={'Authorization':'Bearer '+key.json['key'],'X-Gestion-Mailbox':'miribillabtt@gmail.com'}
+    assert mailer.post(mail,data=upload_data(),headers=dict(mail_headers,Authorization='Bearer incorrect')).status_code==401
+    assert mailer.post(mail,data=upload_data(),headers={**mail_headers,'X-Gestion-Mailbox':'alex.alvarez@miribillacycling.com'}).status_code==401
+    sent=mailer.post(mail,data=upload_data(),headers=mail_headers)
     assert sent.status_code==201,sent.json
     entry=sent.json['id']
     assert browser.post('/api/gestion/invoices',data=upload_data(),headers=headers).json['duplicate']
     source=next(row for row in browser.get('/api/gestion').json['rows'] if row['id']==entry)
     assert source['allocations']=={} and source['status']=='Pendiente de revisar'
+    assert source['needsOCR'] and source['amount']==0
+    review='/api/gestion/'+entry+'/review'
+    values={'date':'2026-11-09','counterparty':'Proveedor','reference':'123','baseAmount':4959,'taxAmount':1041,'amount':6000}
+    assert browser.post(review,json=values,headers=headers).status_code==200
+    assert b';Proveedor;123;' not in browser.get('/api/gestion/export').data
+    assert browser.post(review,json={**values,'approved':True},headers=headers).status_code==200
+    assert b';Proveedor;123;' in browser.get('/api/gestion/export').data
     file='/api/gestion/file/'+source['files'][0]
     assert director.get(file).status_code==403
     assert browser.get(file).data==b'%PDF-1.7\n%%EOF'

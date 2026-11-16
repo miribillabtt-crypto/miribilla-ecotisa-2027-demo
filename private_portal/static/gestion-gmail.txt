@@ -1,0 +1,71 @@
+// Copia este código en un proyecto de Google Apps Script por buzón.
+const GESTION_URL = 'https://miribilla-ecotisa-2027-demo.vercel.app/api/gestion/mail-intake';
+
+function conectarGestion() {
+  const options = PropertiesService.getScriptProperties();
+  if (!options.getProperty('GESTION_KEY') || !options.getProperty('GESTION_MAILBOX')) {
+    throw new Error('Configura GESTION_KEY y GESTION_MAILBOX en las propiedades del proyecto.');
+  }
+  importarFacturas();
+  if (!ScriptApp.getProjectTriggers().some(trigger => trigger.getHandlerFunction() === 'importarFacturas')) {
+    ScriptApp.newTrigger('importarFacturas').timeBased().everyHours(1).create();
+  }
+}
+
+function importarFacturas() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    const options = PropertiesService.getScriptProperties();
+    const key = options.getProperty('GESTION_KEY');
+    const mailbox = options.getProperty('GESTION_MAILBOX');
+    if (!key || !mailbox) throw new Error('Falta configurar el buzón de Gestión.');
+    const query = 'newer_than:30d has:attachment filename:pdf {subject:factura subject:faktura subject:invoice filename:factura filename:faktura filename:invoice} {G95613758 "Miribilla BTT Elkartea"} -in:sent -in:spam -in:trash';
+    const candidates = GmailApp.search(query, 0, 100);
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    let failures = 0;
+    let sent = 0;
+    candidatesLoop: for (const thread of candidates) {
+      for (const message of thread.getMessages()) {
+        if (message.getDate().getTime() < cutoff) continue;
+        const marker = 'gestion:' + message.getId();
+        if (options.getProperty(marker)) continue;
+        let complete = true;
+        const attachments = message.getAttachments({includeInlineImages:false, includeAttachments:true});
+        const invoiceSubject = /factura|faktura|invoice/i.test(message.getSubject());
+        for (const attachment of attachments) {
+          const filename = attachment.getName() || '';
+          if (!/\.pdf$/i.test(filename) || /proforma|presupuesto|albar.n|pedido|extracto|receipt|recibo/i.test(filename)) continue;
+          if (!invoiceSubject && !/factura|faktura|invoice/i.test(filename)) continue;
+          if (attachment.getSize() > 4 * 1024 * 1024) {
+            failures++;
+            complete = false;
+            continue;
+          }
+          if (sent >= 25) break candidatesLoop;
+          sent++;
+          const response = UrlFetchApp.fetch(GESTION_URL,{
+            method:'post',
+            headers:{Authorization:'Bearer '+key,'X-Gestion-Mailbox':mailbox},
+            payload:{file:attachment.copyBlob()},
+            muteHttpExceptions:true,
+            followRedirects:false
+          });
+          const status = response.getResponseCode();
+          if (status === 401) throw new Error('La clave de importación de Gestión no es válida.');
+          if (status !== 200 && status !== 201) {
+            complete = false;
+            failures++;
+          }
+        }
+        if (complete) options.setProperty(marker,String(Date.now()));
+      }
+    }
+    for (const [name,stamp] of Object.entries(options.getProperties())) {
+      if (name.startsWith('gestion:') && Number(stamp) < cutoff) options.deleteProperty(name);
+    }
+    if (failures) throw new Error(failures+' adjuntos no se pudieron importar. Revisa formato, tamaño o conexión.');
+  } finally {
+    lock.releaseLock();
+  }
+}

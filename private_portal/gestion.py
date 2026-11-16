@@ -2,7 +2,6 @@
 import csv
 import hashlib
 import io
-import os
 import re
 import secrets
 import time
@@ -17,6 +16,7 @@ from team_scope import TEAMS
 CENTRAL = 'gestion'
 INBOX = 'gestion:invoice'
 SPLIT = 'gestion:allocation'
+MAIL_ACCOUNTS = ('miribillabtt@gmail.com', 'alex.alvarez@miribillacycling.com')
 BUCKETS = {**TEAMS, 'common': 'Gasto común'}
 
 
@@ -66,13 +66,15 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
                        supplier=data.get('counterparty',''), reference=data.get('reference',''),
                        concept=data.get('concept',''), amount=amount, base=data.get('baseAmount',0),
                        tax=data.get('taxAmount',0), status=data.get('status',''),
-                       allocations=split, files=files.get(row.id, []))
+                       allocations=split, files=files.get(row.id, []), taxId=data.get('taxId',''),
+                       needsReview=row.kind==INBOX and data.get('status')!='Revisada',
+                       needsOCR=bool(data.get('needsOCR')))
 
     @app.get('/api/gestion')
     @require('director')
     def gestion_overview():
         central_only()
-        return jsonify(rows=list(rows()), buckets=BUCKETS)
+        return jsonify(rows=list(rows()), buckets=BUCKETS, mailAccounts=MAIL_ACCOUNTS)
 
     @app.get('/api/gestion/export')
     @require('director')
@@ -91,6 +93,8 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
         if month and not re.fullmatch(r'[0-9]{4}-(0[1-9]|1[0-2])',month):
             abort(400,'Mes no válido')
         for row in sorted(rows(),key=lambda row:(row['date'],row['id'])):
+            if row['needsReview']:
+                continue
             if month and not row['date'].startswith(month):
                 continue
             writer.writerow([*(safe(value) for value in (
@@ -108,6 +112,8 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
     def gestion_team_overview():
         allocated = []
         for row in rows():
+            if row['needsReview']:
+                continue
             amount = row['allocations'].get(g.team,0)
             if (row['team']==g.team and amount!=row['amount']) or (row['team']!=g.team and amount):
                 allocated.append({k: row[k] for k in ('id','date','supplier','reference','concept','direction','team')}
@@ -152,7 +158,16 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
             abort(400,'Indica importes válidos en céntimos')
         return int(value)
 
-    def store_invoice(owner):
+    def invoice_matches(data, supplier, reference, tax_id):
+        def normalize(value):
+            return ''.join(character for character in value.casefold() if character.isalnum())
+        if not reference or not data.get('reference'):
+            return False
+        same_supplier = (normalize(data['taxId'])==normalize(tax_id) if data.get('taxId') and tax_id
+                         else normalize(data.get('counterparty',''))==normalize(supplier))
+        return same_supplier and normalize(data['reference'])==normalize(reference)
+
+    def store_invoice(owner, mail_account=None):
         file = request.files.get('file')
         raw = file.read(4*1024*1024+1) if file else b''
         if not raw.startswith(b'%PDF-') or b'%%EOF' not in raw[-65536:] or len(raw)>4*1024*1024:
@@ -162,27 +177,23 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
         tax_id = invoice_field('taxId',40)
         issue_date = invoice_field('date',10)
         amount, base, tax = (cents(name) for name in ('amount','base','tax'))
-        try:
-            date.fromisoformat(issue_date)
-        except ValueError:
-            abort(400,'Indica la fecha de la factura')
-        if not supplier or not reference or amount<=0 or ((base or tax) and base+tax!=amount):
-            abort(400,'Revisa proveedor, número, base, IVA y total')
-        normalized = lambda value: ''.join(c for c in value.casefold() if c.isalnum())
+        if mail_account:
+            supplier=reference=tax_id=issue_date=''
+            amount=base=tax=0
+        else:
+            check_invoice_fields(issue_date,supplier,reference,amount,base,tax)
         sha = hashlib.sha256(raw).hexdigest()
         lock()
         for row in g.db.execute(all_teams(select(Record.id,Record.kind,Record.data).where(
             Record.kind.in_(('invoice-metadata',INBOX,'module:entry'))))):
             data=unseal(row.data)
-            same_supplier = (normalized(data.get('taxId',''))==normalized(tax_id)
-                             if data.get('taxId') and tax_id else
-                             normalized(data.get('counterparty',''))==normalized(supplier))
-            if data.get('sha256')==sha or (same_supplier and normalized(data.get('reference',''))==normalized(reference)):
+            if data.get('sha256')==sha or invoice_matches(data,supplier,reference,tax_id):
                 return jsonify(duplicate=True)
         entry = Record(kind=INBOX,team=CENTRAL,owner_id=owner,data=seal(dict(
             date=issue_date, counterparty=supplier, reference=reference, taxId=tax_id,
             direction='Gasto', amount=amount, baseAmount=base,taxAmount=tax,
-            concept=invoice_field('concept',250), status='Pendiente de revisar')))
+            concept=invoice_field('concept',250), status='Pendiente de revisar',
+            needsOCR=bool(mail_account), mailAccount=mail_account or '')))
         g.db.add(entry)
         g.db.flush()
         doc = Document(kind='invoice:'+entry.id,team=CENTRAL,owner_id=owner,
@@ -203,16 +214,90 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
         central_only()
         return store_invoice(g.user.id)
 
+    def check_invoice_fields(issue_date,supplier,reference,amount,base,tax):
+        try:
+            if date.fromisoformat(issue_date).isoformat()!=issue_date:
+                raise ValueError()
+        except ValueError:
+            abort(400,'Indica la fecha de la factura')
+        if not supplier or not reference or amount<=0 or ((base or tax) and base+tax!=amount):
+            abort(400,'Revisa proveedor, número, base, IVA y total')
+
+    @app.post('/api/gestion/mail-key')
+    @require('director')
+    def gestion_mail_key():
+        central_only()
+        account=body().get('account')
+        if account not in MAIL_ACCOUNTS:
+            abort(400)
+        lock()
+        key=secrets.token_urlsafe(40)
+        record_id='gestion-mail-key:'+account
+        row=g.db.execute(all_teams(select(Record).where(Record.id==record_id))).scalar_one_or_none()
+        data=seal({'hash':hashlib.sha256(key.encode()).hexdigest()})
+        if row:
+            row.data=data
+        else:
+            g.db.add(Record(id=record_id,kind='gestion:mail-key',team=CENTRAL,owner_id=g.user.id,data=data))
+        audit('gestion_mail_key_rotated',account)
+        return jsonify(key=key)
+
     @app.post('/api/gestion/mail-intake')
     def gestion_mail_intake():
-        secret=os.environ.get('GESTION_MAIL_TOKEN','')
         supplied=request.headers.get('Authorization','')
-        if len(secret)<32 or not secrets.compare_digest(supplied,'Bearer '+secret):
+        account=request.headers.get('X-Gestion-Mailbox','')
+        if not supplied.startswith('Bearer ') or len(supplied)>150 or account not in MAIL_ACCOUNTS:
+            abort(401)
+        row=g.db.execute(all_teams(select(Record.data).where(
+            Record.id=='gestion-mail-key:'+account,Record.kind=='gestion:mail-key'))).scalar_one_or_none()
+        digest=hashlib.sha256(supplied[7:].encode()).hexdigest()
+        if not row or not secrets.compare_digest(unseal(row)['hash'],digest):
             abort(401)
         owner=g.db.execute(all_teams(select(User.id).where(User.id=='shared-direction',User.active.is_(True)))).scalar_one_or_none()
         if not owner:
             abort(503)
-        return store_invoice(owner)
+        return store_invoice(owner,account)
+
+    @app.post('/api/gestion/<entry_id>/review')
+    @require('director')
+    def gestion_review(entry_id):
+        central_only()
+        incoming=body()
+        approved=incoming.get('approved') is True
+        lock()
+        row=g.db.execute(all_teams(select(Record).where(
+            Record.id==entry_id,Record.kind==INBOX).with_for_update())).scalar_one_or_none()
+        if not row:
+            abort(404)
+        current=unseal(row.data)
+        if current.get('status')=='Revisada' or (not approved and not current.get('needsOCR')):
+            abort(409,'La factura ya se ha revisado o preparado')
+        fields={}
+        for key,limit in (('date',10),('counterparty',180),('reference',120),('concept',250),('taxId',40)):
+            value=incoming.get(key,'')
+            if not isinstance(value,str) or len(value)>limit:
+                abort(400,'Revisa los datos de la factura')
+            fields[key]=value.strip()
+        for key in ('amount','baseAmount','taxAmount'):
+            value=incoming.get(key,0)
+            if type(value)!=int or not 0<=value<=999999999:
+                abort(400,'Revisa los importes de la factura')
+            fields[key]=value
+        if approved:
+            check_invoice_fields(fields['date'],fields['counterparty'],fields['reference'],
+                                 fields['amount'],fields['baseAmount'],fields['taxAmount'])
+            existing=g.db.execute(all_teams(select(Record.kind,Record.data).where(
+                Record.id!=entry_id,Record.kind.in_(('module:entry',INBOX)))))
+            for kind,encrypted in existing:
+                item=unseal(encrypted)
+                if kind==INBOX and item.get('status')!='Revisada':
+                    continue
+                if invoice_matches(item,fields['counterparty'],fields['reference'],fields['taxId']):
+                    abort(409,'Ya hay un asiento con ese proveedor y número de factura')
+        current.update(fields,needsOCR=False,status='Revisada' if approved else 'Pendiente de revisar')
+        row.data=seal(current)
+        audit('gestion_invoice_reviewed' if approved else 'gestion_invoice_ocr_prepared',entry_id)
+        return jsonify(ok=True)
 
     @app.get('/api/gestion/file/<file_id>')
     @require('director')
