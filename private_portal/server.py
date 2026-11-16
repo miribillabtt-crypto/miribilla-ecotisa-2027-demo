@@ -11,6 +11,7 @@ import pyotp
 from openpyxl import Workbook
 from PIL import Image
 from roster_import import normalize
+from gestion import can_manage_gestion, register_gestion
 from team_scope import NETKOM, OCCIDENT, TEAMS, NEW_TEAMS, configure_team_scope
 from roster_import import OCCIDENT_CATEGORIES, import_roster
 
@@ -152,7 +153,7 @@ def create_app(test_config=None):
         g.db.info.pop('team',None)
         if request.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS'):
             expected=os.environ.get('PUBLIC_ORIGIN')
-            if not app.testing:
+            if not app.testing and request.path!='/api/gestion/mail-intake':
                 origin=request.headers.get('Origin','')
                 if not expected or origin!=expected:abort(403,'Origen no permitido')
         token=request.cookies.get('__Host-mbb')
@@ -219,7 +220,7 @@ def create_app(test_config=None):
     @app.get('/api/me')
     def me():
         if not g.user:return jsonify(user=None)
-        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,teams=TEAMS,canSwitchTeam=g.user.id=='shared-direction',canInviteUsers=g.user.owner or (g.user.id=='shared-direction' and g.team in NEW_TEAMS),clothes=CLOTHES,fines=FINE_TYPES)
+        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,teams=TEAMS,canSwitchTeam=g.user.id=='shared-direction',canManageGestion=can_manage_gestion(g.user),canInviteUsers=g.user.owner or (g.user.id=='shared-direction' and g.team in NEW_TEAMS),clothes=CLOTHES,fines=FINE_TYPES)
     @app.post('/api/team')
     @require('director')
     def switch_team():
@@ -821,6 +822,7 @@ def create_app(test_config=None):
     register_resources(app,Record,seal,unseal,audit,require,body)
     from modules import register_modules
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
+    register_gestion(app,Record,Document,User,cipher,seal,unseal,audit,require,body)
     from invoices import register_invoices
     register_invoices(app,Record,Document,cipher,seal,unseal,audit,require)
     from bank_reconciliation import register_bank_reconciliation
