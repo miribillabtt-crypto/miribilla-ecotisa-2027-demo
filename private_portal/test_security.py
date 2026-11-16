@@ -1163,3 +1163,24 @@ def test_monthly_club_settlement_criteria_dates_and_access(env):
  updated=next(r for r in director.get('/api/modules/entry').json['records'] if r['id']==row['id'])
  assert updated['paidBy']=='Alex' and updated['allocationRule']=='Mitad' and updated['paymentDate']=='2027-02-02'
  assert all(r['shares']['Miribilla']+r['shares']['Ecotisa']==r['amount'] for r in result['entries'])
+
+
+def test_netkom_runner_photos_are_saved_and_previewable(env):
+ _,ids,login,_=env
+ runner,h=login('runner')
+ other,_=login('runner2')
+ path='/api/documents/'+ids['runner']
+ ids_saved=[]
+ for kind in ('portrait','action'):
+  image=io.BytesIO()
+  Image.new('RGB',(100,80),'blue').save(image,format='JPEG')
+  photo=runner.post(path,data={'kind':kind,'file':(io.BytesIO(image.getvalue()),'foto.jpg')},headers=h)
+  assert photo.status_code==200
+  ids_saved.append(photo.json['id'])
+ assert {row['id'] for row in runner.get(path).json['documents']}==set(ids_saved)
+ for photo_id in ids_saved:
+  url='/api/file/'+photo_id+'?preview=1'
+  preview=runner.get(url)
+  assert preview.status_code==200 and preview.mimetype=='image/jpeg'
+  assert preview.headers['Content-Disposition'].startswith('inline')
+  assert other.get(url).status_code==403

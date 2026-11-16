@@ -99,3 +99,5 @@ header:has(.occident-brand){background:#ac3d0d}
 .team-switcher button[aria-pressed=true]{background:#fff;border-color:#fff;color:#17388d}
 .team-switcher button:hover:not([aria-pressed=true]){background:#ffffff25}
 @media(max-width:600px){.brand-lockup{flex-wrap:wrap}.brand-lockup>.team-switcher{margin-left:0}}
+
+.rider-photo-thumb{width:84px;height:64px;object-fit:cover;border-radius:6px}

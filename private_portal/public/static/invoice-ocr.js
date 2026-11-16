@@ -12,12 +12,12 @@ window.InvoiceOCR=(()=>{
   return [...tokens].map(match=>number(match[1]||match[2])).filter(Number.isFinite);
  }
  const totalLabels=[
-  /\b(?:total\s+(?:de\s+(?:la\s+)?)?(?:factura|documento|con\s+iva|iva\s+incluido|euros?|eur)|importe\s+total|grand\s+total)\b/i,
-  /\btotal\b(?!\s+(?:iva|igic|base|descuento|impuestos|retenci[oó]n|sin\s+iva|ahorro|art[ií]culos?|unidades|efectivo|tarjeta|a\s+pagar|pendiente)\b)/i,
-  /\b(?:total\s+a\s+pagar|importe\s+a\s+pagar|a\s+pagar|amount\s+due)\b/i
+  /\b(?:total\s+(?:de\s+(?:la\s+)?)?(?:factura|documento|con\s+iva|iva\s+incluido|euros?|eur)|importe\s+total|grand\s+total|guztira|zenbateko\s+osoa|ordaintzeko\s+zenbatekoa|total\s+ttc|invoice\s+total|total\s+due)\b/i,
+  /\b(?:total\s+a\s+pagar|importe\s+a\s+pagar|a\s+pagar|amount\s+due)\b/i,
+  /\btotal\b(?!\s+(?:iva|igic|base|descuento|impuestos|retenci[oó]n|sin\s+iva|ahorro|art[ií]culos?|unidades|efectivo|tarjeta|a\s+pagar|pendiente)\b)/i
  ];
- const baseLabel=/\b(?:base\s+(?:imponible|iva|igic|sujeta)|subtotal|importe\s+neto|total\s+sin\s+iva)\b/i;
- const taxLabel=/\b(?:cuota\s+(?:de\s+)?(?:iva|igic)|importe\s+iva|iva\s+repercutido|total\s+iva|iva(?=\s*[:=]|\s+\d{1,2}\s*%))\b/i;
+ const baseLabel=/\b(?:base\s+(?:imponible|iva|igic|sujeta)|subtotal|importe\s+neto|total\s+sin\s+iva|zenbateko\s+gordina|zerga\s+oinarria|taxable\s+amount|total\s+ht)\b/i;
+ const taxLabel=/\b(?:cuota\s+(?:de\s+)?(?:iva|igic)|importe\s+iva|iva\s+repercutido|total\s+iva|zenbatekoa\s+bez|bez\s+kuota|vat\s+amount|iva(?=\s*[:=]|\s+\d{1,2}\s*%))\b/i;
  function labeled(lines,pattern,{integer=false,first=false,ignore=()=>false}={}){
   const nextAmount=/^(?:€\s*)?-?[\d., ]+(?:\s*(?:€|EUR))?$/i;
   for(let i=lines.length-1;i>=0;i--){
@@ -60,7 +60,7 @@ window.InvoiceOCR=(()=>{
    },0);
    if(!Number.isFinite(tax))tax=Math.round(declaredTax*100)/100;
   }
-  const header=lines.findIndex(line=>/\bbase\s+imponible\b/i.test(line)&&/\b(?:cuota|iva|igic)\b/i.test(line)&&moneyValues(line).length===0);
+  const header=lines.findIndex(line=>/\bbase\s*(?:imponible|imp\.?)?\b/i.test(line)&&/\b(?:cuota|i\.?v\.?a|igic)\b/i.test(line)&&moneyValues(line).length===0);
   if(header>=0){
    const columns=lines[header];
    const table=[];
@@ -78,15 +78,21 @@ window.InvoiceOCR=(()=>{
     }
    }
   }
-  const amount=Number.isFinite(total)?total:Number.isFinite(base)&&Number.isFinite(tax)?Math.round((base+tax)*100)/100:NaN;
+  const round=value=>Math.round(value*100)/100;
+  if(Number.isFinite(total)&&Number.isFinite(base)&&!Number.isFinite(tax)&&total===base&&lines.some(line=>/exent[oa]|sin iva|iva\s*0\s*%/i.test(line)))tax=0;
+  if(Number.isFinite(total)&&Number.isFinite(base)&&base<=total&&!Number.isFinite(tax)&&!lines.some(line=>/retenci[oó]n|irpf|descuento|recargo/i.test(line)))tax=round(total-base);
+  if(Number.isFinite(total)&&Number.isFinite(tax)&&tax<=total&&!Number.isFinite(base)&&!lines.some(line=>/retenci[oó]n|irpf|descuento|recargo/i.test(line)))base=round(total-tax);
+  const amount=Number.isFinite(total)?total:Number.isFinite(base)&&Number.isFinite(tax)?round(base+tax):NaN;
   return {amount,baseAmount:base,taxAmount:tax};
  }
  function parse(raw){const text=String(raw||'').replace(/\r/g,'\n').replace(/\u00a0/g,' '),lines=text.split(/\n+/).map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean),find=rx=>lines.find(x=>rx.test(x))||'';
  const heading=lines.findIndex(line=>/\bFACTU\s*RA\b/i.test(line)&&!/\btotal\b/i.test(line));
  const standaloneRef=heading>=0?lines.slice(heading,heading+8).join('\n').match(/\bn[úu]mero\s*[:#]\s*([A-Z0-9][A-Z0-9_./-]{2,31})/i):null;
- const reference=standaloneRef?.[1]||(text.match(/(?:n[úu]mero\s+(?:de\s+)?factura|factura\s*(?:n[.º°oúu]*|#|no\.?|número)?|n[.º°oúu]*\s*factura)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_./-]{2,31})/i)||[])[1]||'';
- const dated=find(/fecha\s*(?:de\s*)?(?:emisi[oó]n|factura|expedici[oó]n|[:=])/i),when=date(dated)||date(text);
- const taxId=(text.match(/\bTBAI-([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])-/i)||[])[1]||(text.match(/\b(?:NIF|CIF|VAT(?:\s*ID)?)\s*[:.\-]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z]|[A-Z]{2}\d{8,12})\b/i)||[])[1]||'';
+ const explicitRef=lines.map(line=>line.match(/^(?:factura|faktura|invoice)\s*(?:z[kK]ª?|n(?:[.º°]|[úu]mero)*|no\.?|number|#)?\s*[:#-]?\s*([A-Z]{1,8}\d{0,8}\s+\d{1,12}|[A-Z0-9][A-Z0-9_.\/-]{0,31})\b/i)?.[1]).find(value=>value&&/\d/.test(value));
+ const reference=standaloneRef?.[1]||explicitRef||(text.match(/(?:n[úu]mero\s+(?:de\s+)?factura|factura\s*(?:n[.º°oúu]*|#|no\.?|número)?|n[.º°oúu]*\s*factura)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_./-]{2,31})/i)||[])[1]||'';
+ const dated=find(/espedizio\s+data|faktura\s+data|invoice\s+date|fecha\s*(?:de\s*)?(?:emisi[oó]n|factura|expedici[oó]n|[:=])/i),when=date(dated)||date(text);
+ const supplierText=text.replace(/\bG95613758\b/gi,'');
+ const taxId=(supplierText.match(/\bTBAI-([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])-/i)||[])[1]||(supplierText.match(/\b(?:NIF|CIF|VAT(?:\s*ID)?|I\.F\.Z\.|I\.F\.K\.)\s*[:.\-]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z]|[A-Z]{2}\d{8,12})\b/i)||[])[1]||'';
  let vendor=find(/^(?:emisor|proveedor|raz[oó]n\s+social|empresa)\s*[:=-]/i).replace(/^(?:emisor|proveedor|raz[oó]n\s+social|empresa)\s*[:=-]\s*/i,'');if(!vendor){
   const company=lines.slice(0,12).map(line=>line.replace(/\s+[5§]\s*\.\s*[1lI]\.?$/,' S.L.')).find(line=>/\b(?:S\.?\s*[LA]\.?|S\.?\s*L\.?\s*U\.?)$/i.test(line)&&/[a-záéíóú]{3}/i.test(line));
   vendor=company||lines.slice(0,12).find(line=>/^hotel\s+[a-záéíóú]{3,}/i.test(line))||'';

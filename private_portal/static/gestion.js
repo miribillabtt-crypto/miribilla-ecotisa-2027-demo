@@ -120,7 +120,7 @@ async function gestionPage(content,runOCR=true){
   if(!status.isConnected||!result)return;
   const previousMonth=month.value;
   const previousSearch=search.value;
-  if(result.prepared){
+  if(result.prepared||result.partial){
    await gestionPage(content,false);
    const nextMonth=content.querySelector('#gestionMonth');
    const nextSearch=content.querySelector('#gestionSearch');
@@ -133,7 +133,7 @@ async function gestionPage(content,runOCR=true){
    button.disabled=false;
   }
   content.querySelector('#gestionOCRStatus').textContent=
-   `${result.prepared} borradores preparados.${result.failed?' '+result.failed+' PDF sin importe fiable. Puedes completar sus datos manualmente.':''}`;
+   `${result.prepared} borradores preparados.${result.partial?' '+result.partial+' con datos parciales guardados.':''}${result.failed?' '+result.failed+' PDF sin datos reconocibles.':''}`;
  }
  button.onclick=()=>run().catch(error=>{if(status.isConnected){status.textContent=error.message;button.disabled=false;}});
  if(runOCR&&pendingOCR.some(row=>row.needsOCR))void button.onclick();
@@ -142,9 +142,10 @@ async function gestionPage(content,runOCR=true){
 async function prepareGestionOCR(rows,status){
  let prepared=0;
  let failed=0;
+ let partial=0;
  for(const row of rows){
   if(!status.isConnected)return;
-  const progress=`Leyendo PDF ${prepared+failed+1} de ${rows.length}`;
+  const progress=`Leyendo PDF ${prepared+failed+partial+1} de ${rows.length}`;
   status.textContent=progress;
   try{
    const response=await fetch('/api/gestion/file/'+encodeURIComponent(row.files[0]),{cache:'no-store'});
@@ -153,15 +154,16 @@ async function prepareGestionOCR(rows,status){
    const result=await InvoiceOCR.read(file,step=>{if(status.isConnected)status.textContent=progress+' · '+step;},{cancelled:false});
    if(!status.isConnected)return;
    const data=InvoiceOCR.parse(result.text);
-   if(!Number.isFinite(data.amount)||data.amount<=0)throw Error('Importe pendiente de revisar');
+   const hasAmount=Number.isFinite(data.amount)&&data.amount>0;
+   if(!result.text.trim()||(!hasAmount&&!data.reference&&!data.date&&!data.taxId&&!data.counterparty))throw Error('PDF sin datos reconocibles');
    const draft={date:data.date||row.date||'',counterparty:(data.counterparty||row.supplier||'').slice(0,180),
      reference:data.reference||row.reference||'',taxId:data.taxId||row.taxId||'',concept:data.concept||row.concept||''};
-   for(const key of ['baseAmount','taxAmount','amount'])draft[key]=Number.isFinite(data[key])?Math.max(0,Math.round(data[key]*100)):0;
+   for(const key of ['baseAmount','taxAmount','amount'])draft[key]=Number.isFinite(data[key])?Math.max(0,Math.round(data[key]*100)):({baseAmount:row.base,taxAmount:row.tax,amount:row.amount})[key]||0;
    await api('/gestion/'+encodeURIComponent(row.id)+'/review','POST',draft);
-   prepared++;
+   if(hasAmount)prepared++;else partial++;
   }catch{failed++;}
  }
- return {prepared,failed};
+ return {prepared,failed,partial};
 }
 
 async function teamAccountingPage(content){

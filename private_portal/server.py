@@ -581,7 +581,7 @@ def create_app(test_config=None):
             except Exception:abort(400,'Imagen no válida')
         total=g.db.scalar(select(func.coalesce(func.sum(Document.size),0)))
         if total+len(raw)>400*1024*1024:abort(400,'Almacenamiento completo. Contacta con Dirección.')
-        d=Document(owner_id=target,kind=kind,size=len(raw),mime=mime,created=int(time.time()),content=cipher.encrypt(raw));g.db.add(d);g.db.flush();audit('document_uploaded',d.id);return jsonify(ok=True)
+        d=Document(owner_id=target,kind=kind,size=len(raw),mime=mime,created=int(time.time()),content=cipher.encrypt(raw));g.db.add(d);g.db.flush();audit('document_uploaded',d.id);return jsonify(ok=True,id=d.id)
     @app.get('/api/file/<file_id>')
     @require()
     def file(file_id):
@@ -593,7 +593,7 @@ def create_app(test_config=None):
         if d.kind in PHOTO_TYPES and g.user.role=='communication':allowed=bool(unseal(u.profile).get('photoConsent'))
         if not allowed:abort(403)
         audit('document_downloaded',d.id)
-        return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=True,download_name=d.kind+({'application/pdf':'.pdf','image/png':'.png'}.get(d.mime,'.jpg')))
+        return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=not(d.kind in PHOTO_TYPES and request.args.get('preview')=='1'),download_name=d.kind+({'application/pdf':'.pdf','image/png':'.png'}.get(d.mime,'.jpg')))
     @app.post('/api/file/<file_id>/delete')
     @require('director','runner')
     def delete_file(file_id):
