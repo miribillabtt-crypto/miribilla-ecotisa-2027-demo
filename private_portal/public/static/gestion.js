@@ -1,7 +1,7 @@
 'use strict';
 
 async function gestionPage(content,runOCR=true){
- const {rows,buckets,mailAccounts}=await api('/gestion');
+ const {rows,archived,buckets,mailAccounts}=await api('/gestion');
  const sorted=rows.sort((a,b)=>b.date.localeCompare(a.date)||a.supplier.localeCompare(b.supplier,'es'));
  content.innerHTML=`<h1>Gestión</h1><p>Contabilidad de Miribilla BTT Elkartea · CIF G95613758</p>
  <details class="card"><summary>Conectar Gmail</summary>
@@ -27,7 +27,11 @@ async function gestionPage(content,runOCR=true){
  <label>Mes<input id="gestionMonth" type="month"></label><a class="button" id="gestionExport" href="/api/gestion/export">Exportar contabilidad consolidada</a></div>
  <div class="toolbar"><button type="button" id="gestionRunOCR" class="primary">Leer facturas pendientes con OCR</button></div>
  <p id="gestionOCRStatus" role="status" aria-live="polite"></p>
- <div id="gestionTotals"></div><div id="gestionRows"></div>`;
+ <div id="gestionTotals"></div><div id="gestionRows"></div>
+ <details class="card"><summary>Asientos borrados (${archived.length})</summary>
+ ${archived.map(row=>`<p>${esc(row.date||'Sin fecha')} · ${esc(row.supplier||row.concept||'Apunte')} · ${euros(row.amount)}
+ <button type="button" data-gestion-restore="${esc(row.id)}">Recuperar asiento</button></p>`).join('')||'<p>No hay asientos borrados.</p>'}
+ </details>`;
  const search=content.querySelector('#gestionSearch');
  const bucket=content.querySelector('[name="gestionBucket"]');
  const month=content.querySelector('#gestionMonth');
@@ -81,8 +85,12 @@ async function gestionPage(content,runOCR=true){
      <div class="grid">${Object.entries(buckets).map(([key,label])=>
        `<label>${esc(label)}<input name="${key}" type="number" min="0" step="0.01" value="${row.allocations[key]?row.allocations[key]/100:''}"></label>`).join('')}</div>
      <button type="submit">Guardar reparto</button></form>`:''}
+   <button type="button" data-gestion-archive="${esc(row.id)}">Borrar asiento</button>
    </details>`;
   }).join('')||'<p>No hay apuntes con estos filtros.</p>';
+  for(const action of list.querySelectorAll('[data-gestion-archive]')){
+   action.onclick=()=>changeArchive(action,action.dataset.gestionArchive,false);
+  }
   for(const row of matches){
    bindForm('gestion-review-'+row.id,async(_,data)=>{
     await api('/gestion/'+encodeURIComponent(row.id)+'/review','POST',toEntry(data,true));
@@ -98,6 +106,19 @@ async function gestionPage(content,runOCR=true){
    message('Reparto guardado.');
    });
   }
+ }
+ async function changeArchive(button,id,restore){
+  if(!restore&&!confirm('¿Borrar este asiento de Gestión y de los informes? Podrás recuperarlo desde Asientos borrados.'))return;
+  button.disabled=true;
+  try{
+   await api('/gestion/'+encodeURIComponent(id)+(restore?'/restore':'/archive'),'POST',{});
+   if(!content.isConnected)return;
+   await gestionPage(content,false);
+   message(restore?'Asiento recuperado.':'Asiento borrado. Puedes recuperarlo en Asientos borrados.');
+  }catch(error){message(error.message);button.disabled=false;}
+ }
+ for(const action of content.querySelectorAll('[data-gestion-restore]')){
+  action.onclick=()=>changeArchive(action,action.dataset.gestionRestore,true);
  }
  search.oninput=render;
  bucket.onchange=month.onchange=render;

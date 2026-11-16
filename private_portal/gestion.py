@@ -11,11 +11,13 @@ from flask import abort, g, jsonify, request, send_file
 from sqlalchemy import select, text
 from werkzeug.utils import secure_filename
 
+from bank_reconciliation import bank_lock
 from team_scope import TEAMS
 
 CENTRAL = 'gestion'
 INBOX = 'gestion:invoice'
 SPLIT = 'gestion:allocation'
+ARCHIVED = {'module:entry': 'archived:entry', INBOX: 'gestion:archived-invoice'}
 MAIL_ACCOUNTS = ('miribillabtt@gmail.com', 'alex.alvarez@miribillacycling.com')
 BUCKETS = {**TEAMS, 'common': 'Gasto común'}
 
@@ -47,9 +49,10 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
             out.setdefault(kind[8:], []).append(file_id)
         return out
 
-    def rows():
+    def rows(archived=False):
+        kinds = ARCHIVED.values() if archived else ARCHIVED.keys()
         entries = list(g.db.execute(all_teams(select(Record.id, Record.team, Record.kind, Record.data)
-                       .where(Record.kind.in_(('module:entry', INBOX, SPLIT))))))
+                       .where(Record.kind.in_((*kinds, SPLIT))))))
         splits = {row.id: unseal(row.data) for row in entries if row.kind == SPLIT}
         files = documents([row.id for row in entries if row.kind != SPLIT])
         for row in entries:
@@ -74,7 +77,28 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
     @require('director')
     def gestion_overview():
         central_only()
-        return jsonify(rows=list(rows()), buckets=BUCKETS, mailAccounts=MAIL_ACCOUNTS)
+        return jsonify(rows=list(rows()), archived=list(rows(archived=True)), buckets=BUCKETS, mailAccounts=MAIL_ACCOUNTS)
+
+    @app.post('/api/gestion/<entry_id>/archive')
+    @app.post('/api/gestion/<entry_id>/restore')
+    @require('director')
+    def gestion_archive(entry_id):
+        central_only()
+        restoring = request.path.endswith('/restore')
+        kinds = {target: source for source, target in ARCHIVED.items()} if restoring else ARCHIVED
+        lock()
+        bank_lock()
+        row = g.db.execute(all_teams(select(Record).where(
+            Record.id==entry_id, Record.kind.in_(kinds)).with_for_update())).scalar_one_or_none()
+        if not row:
+            abort(404, 'Asiento no encontrado')
+        if not restoring and row.kind=='module:entry':
+            movements = g.db.execute(all_teams(select(Record.data).where(Record.kind=='module:bank')))
+            if any(unseal(data).get('matched')==entry_id for (data,) in movements):
+                abort(409, 'Desvincula primero el movimiento en Conciliación bancaria')
+        row.kind = kinds[row.kind]
+        audit('gestion_entry_restored' if restoring else 'gestion_entry_archived', row.id)
+        return jsonify(ok=True)
 
     @app.get('/api/gestion/export')
     @require('director')

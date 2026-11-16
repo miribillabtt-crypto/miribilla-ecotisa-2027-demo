@@ -61,3 +61,15 @@ def test_gestion(env):
     access=alex.get('/api/me').json
     assert access['canManageGestion'] and not access['canSwitchTeam']
     assert alex.get('/api/gestion').status_code==200
+    archive='/api/gestion/'+entry+'/archive'
+    csrf={'X-CSRF-Token':browser.get('/api/me').json['csrf']}
+    assert director.post(archive,json={},headers=h).status_code==403
+    assert browser.post(archive,json={},headers=csrf).status_code==200
+    overview=browser.get('/api/gestion').json
+    assert entry not in [row['id'] for row in overview['rows']]
+    assert entry in [row['id'] for row in overview['archived']]
+    assert b';Proveedor;123;' not in browser.get('/api/gestion/export').data
+    assert browser.get('/api/gestion/team').json['rows']==[]
+    assert browser.get(file).status_code==200
+    assert browser.post('/api/gestion/'+entry+'/restore',json={},headers=csrf).status_code==200
+    assert b';Proveedor;123;' in browser.get('/api/gestion/export').data
