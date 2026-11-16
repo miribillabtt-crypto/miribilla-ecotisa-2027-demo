@@ -360,22 +360,28 @@ function vehicleAvailability(container,vehicles,events,bookings){
        <label>Motivo (opcional)<input name="reason" maxlength="250"></label>
       </div>
       <button type="submit" class="primary">Guardar reserva</button>
+      <button type="button" id="cancelVehicleEdit" hidden>Salir de edición</button>
      </form></details>`:''}`;
   container.prepend(section);
   const day=section.querySelector('#vehicleDay');
   const form=section.querySelector('#standaloneVehicleBooking');
+  const exitEdit=section.querySelector('#cancelVehicleEdit');
+  let editing=null;
   if(form){
    const start=form.elements.date,end=form.elements.endDate;
+   const heading=form.parentElement.querySelector('summary');
+   exitEdit.onclick=()=>{editing=null;form.reset();syncDate();heading.textContent='Reservar sin actividad';exitEdit.hidden=true;};
    form.elements.vehicle.required=true;
-   const syncDate=()=>{start.value=day.value;end.min=start.value;};
+   const syncDate=()=>{if(!editing){start.value=day.value;end.min=start.value;}};
    syncDate();
    start.onchange=()=>{end.min=start.value;};
    day.addEventListener('change',syncDate);
    bindForm(form.id,async(_,data)=>{
-    await api('/vehicle-reservations','POST',data);
+    const path='/vehicle-reservations';
+    await api(editing?path+'/'+encodeURIComponent(editing):path,editing?'PUT':'POST',data);
     vehicleBookingDay=data.date;
     await navigate('vehicles');
-    message('Vehículo reservado.');
+    message(editing?'Reserva modificada.':'Vehículo reservado.');
    });
   }
   const activeIds=new Set(vehicles.map(vehicle=>vehicle.id));
@@ -397,10 +403,22 @@ function vehicleAvailability(container,vehicles,events,bookings){
         return activity?team+' · '+activity.name:row.direct?team+' · '+vehicleUsage(row):team;
       }))];
       const direct=matching.filter(row=>row.direct&&row.id&&me.role==='director').map(row=>
-        `<div class="row"><small>${esc(row.reason||'Reserva sin actividad')}</small><button type="button" data-cancel-reservation="${esc(row.id)}">Cancelar reserva</button></div>`
+        `<div class="row"><small>${esc(row.reason||'Reserva sin actividad')}</small><button type="button" data-edit-reservation="${esc(row.id)}">Editar reserva</button><button type="button" data-cancel-reservation="${esc(row.id)}">Cancelar reserva</button></div>`
       ).join('');
       return `<div class="row"><strong>${esc(vehicle.name)}</strong><span class="resource-state ${labels.length?'assigned':'available'}">${labels.length?'Reservado · '+labels.map(esc).join(', '):'Libre'}</span>${direct}</div>`;
     }).join('')||'<p>No hay vehículos registrados.</p>';
+    output.querySelectorAll('[data-edit-reservation]').forEach(button=>button.onclick=()=>{
+     const row=bookings.find(item=>item.id===button.dataset.editReservation);
+     editing=row.id;
+     for(const [name,value] of Object.entries({vehicle:row.vehicles[0],date:row.date,endDate:row.endDate,usage:row.usage,reason:row.reason||''})){
+      form.elements[name].value=value;
+     }
+     form.elements.endDate.min=row.date;
+     form.parentElement.querySelector('summary').textContent='Editar reserva';
+     form.parentElement.open=true;
+     exitEdit.hidden=false;
+     form.elements.vehicle.focus();
+    });
     output.querySelectorAll('[data-cancel-reservation]').forEach(button=>button.onclick=async()=>{
      if(!confirm('¿Cancelar esta reserva del vehículo?'))return;
      button.disabled=true;

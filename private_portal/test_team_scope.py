@@ -118,13 +118,15 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
     created=change('POST','vehicle-reservations',draft)
     assert created.status_code==201
     path='vehicle-reservations/'+created.json['id']
+    assert change('PUT',path,dict(draft,reason='Modificada')).status_code==200
     own=client.get('/api/resource-availability').json['vehicleBookings'][0]
-    assert own['id']==created.json['id'] and own['reason']=='Taller' and own['usage']=='trabajo'
+    assert own['id']==created.json['id'] and own['reason']=='Modificada' and own['usage']=='trabajo'
     assert change('POST','team',{'team':'netkom'}).status_code==200
     shared=client.get('/api/resource-availability').json['vehicleBookings']
     assert shared==[{'team':'occident','event':None,'date':'2027-05-01','endDate':'2027-05-02',
                     'vehicles':[vehicle],'direct':True,'usage':'trabajo'}]
     assert change('DELETE',path).status_code==404
+    assert change('PUT',path,draft).status_code==404
     assert change('POST','vehicle-reservations',dict(draft,date='2027-05-02')).status_code==409
     assert change('POST','events',{'name':'Carrera','date':'2027-05-02'}).status_code==200
     event=client.get('/api/events').json['events'][0]['id']

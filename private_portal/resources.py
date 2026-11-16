@@ -103,9 +103,10 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
                   for row in bookings if row['team']!=g.team and row['staff']]
         return jsonify(records=records, shared=shared, vehicleBookings=vehicles)
 
+    @app.put('/api/vehicle-reservations/<reservation_id>')
     @app.post('/api/vehicle-reservations')
     @require('director')
-    def reserve_vehicle():
+    def reserve_vehicle(reservation_id=None):
         data=body()
         vehicle=data.get('vehicle')
         start=data.get('date')
@@ -122,10 +123,17 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         except (TypeError, ValueError):
             abort(400,'Indica una fecha de inicio y una fecha de fin válida')
         lock_vehicle_bookings(g.db)
+        row=g.db.get(Record,reservation_id,with_for_update=True) if reservation_id else None
+        if reservation_id and (not row or row.kind!=VEHICLE_BOOKING or row.team!=g.team):abort(404)
         resource=g.db.get(Record,vehicle,with_for_update=True)
         if not resource or resource.kind!='module:vehicle':abort(404,'Vehículo no disponible')
         reservation=dict(vehicle=vehicle,date=start,endDate=end,reason=reason.strip(),usage=usage)
-        check_manual_vehicle_booking(resource_bookings(g.db,Record,unseal),g.team,None,reservation,vehicle)
+        bookings=resource_bookings(g.db,Record,unseal)
+        check_manual_vehicle_booking((booking for booking in bookings if not reservation_id or booking.get('reservation')!=reservation_id),g.team,None,reservation,vehicle)
+        if row:
+            row.data=seal(reservation)
+            audit('vehicle_reservation_updated',row.id)
+            return jsonify(id=row.id)
         row=Record(kind=VEHICLE_BOOKING,owner_id=g.user.id,data=seal(reservation))
         g.db.add(row)
         g.db.flush()
