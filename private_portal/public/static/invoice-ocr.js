@@ -78,6 +78,14 @@ window.InvoiceOCR=(()=>{
     }
    }
   }
+  const reverseTaxHeader=lines.findIndex(line=>/%\s*imp\.?\s+importe\s+imp\.?\s+base\s+imponible/i.test(line));
+  if(reverseTaxHeader>=0){
+   const amounts=moneyValues(lines[reverseTaxHeader+1]||'');
+   if(amounts.length===3&&amounts[0]>=0&&amounts[0]<=100&&Math.abs(Math.round(amounts[2]*amounts[0])/100-amounts[1])<=0.02){
+    tax=amounts[1];
+    base=amounts[2];
+   }
+  }
   const round=value=>Math.round(value*100)/100;
   if(Number.isFinite(total)&&Number.isFinite(base)&&!Number.isFinite(tax)&&total===base&&lines.some(line=>/exent[oa]|sin iva|iva\s*0\s*%/i.test(line)))tax=0;
   if(Number.isFinite(total)&&Number.isFinite(base)&&base<=total&&!Number.isFinite(tax)&&!lines.some(line=>/retenci[oó]n|irpf|descuento|recargo/i.test(line)))tax=round(total-base);
@@ -92,10 +100,11 @@ window.InvoiceOCR=(()=>{
  const reference=standaloneRef?.[1]||explicitRef||(text.match(/(?:n[úu]mero\s+(?:de\s+)?factura|factura\s*(?:n[.º°oúu]*|#|no\.?|número)?|n[.º°oúu]*\s*factura)\s*[:#-]?\s*([A-Z0-9][A-Z0-9_./-]{2,31})/i)||[])[1]||'';
  const dated=find(/espedizio\s+data|faktura\s+data|invoice\s+date|fecha\s*(?:de\s*)?(?:emisi[oó]n|factura|expedici[oó]n|[:=])/i),when=date(dated)||date(text);
  const supplierText=text.replace(/\bG95613758\b/gi,'');
- const taxId=(supplierText.match(/\bTBAI-([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])-/i)||[])[1]||(supplierText.match(/\b(?:NIF|CIF|VAT(?:\s*ID)?|I\.F\.Z\.|I\.F\.K\.)\s*[:.\-]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z]|[A-Z]{2}\d{8,12})\b/i)||[])[1]||'';
+ const standaloneTaxId=lines.slice(0,8).map(line=>line.match(/^([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])$/i)?.[1]).find(id=>id&&id.toUpperCase()!=='G95613758');
+ const taxId=(supplierText.match(/\bTBAI-([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z])-/i)||[])[1]||(supplierText.match(/\b(?:NIF|CIF|VAT(?:\s*ID)?|I\.F\.Z\.|I\.F\.K\.)\s*[:.\-]?\s*([A-Z]\d{7}[A-Z0-9]|\d{8}[A-Z]|[A-Z]{2}\d{8,12})\b/i)||[])[1]||standaloneTaxId||'';
  let vendor=find(/^(?:emisor|proveedor|raz[oó]n\s+social|empresa)\s*[:=-]/i).replace(/^(?:emisor|proveedor|raz[oó]n\s+social|empresa)\s*[:=-]\s*/i,'');if(!vendor){
   const company=lines.slice(0,12).map(line=>line.replace(/\s+[5§]\s*\.\s*[1lI]\.?$/,' S.L.')).find(line=>/\b(?:S\.?\s*[LA]\.?|S\.?\s*L\.?\s*U\.?)$/i.test(line)&&/[a-záéíóú]{3}/i.test(line));
-  vendor=company||lines.slice(0,12).find(line=>/^hotel\s+[a-záéíóú]{3,}/i.test(line))||'';
+  vendor=company||lines.slice(0,12).find(line=>/sociedad\s+(?:limitada|an[oó]nima)\s*$/i.test(line))||lines.slice(0,12).find(line=>/^hotel\s+[a-záéíóú]{3,}/i.test(line))||'';
  }if(!vendor)vendor=lines.slice(0,8).find(x=>x.length>4&&x.length<90&&!/^(FACTURA|TICKET|NOTA|FECHA|NIF|CIF|IVA|N[º°]|TOTAL|CLIENTE|DIRECCI[OÓ]N|TEL|WWW|HTTP|ESPAÑA|\d|BASE|PRESUPUESTO)/i.test(x)&&!/@/.test(x))||'';
  let concept=find(/^(?:concepto|descripci[oó]n|detalle|servicio)\s*[:=-]\s*\S/i).replace(/^(?:concepto|descripci[oó]n|detalle|servicio)\s*[:=-]\s*/i,'');if(!concept&&vendor)concept='Factura de '+vendor;
  const joined=(vendor+' '+concept+' '+text.slice(0,1000)).toLowerCase();let category='Otros';if(/hotel|alojamiento|habitaci[oó]n|hospedaje/.test(joined))category='Alojamiento';else if(/supermercado|mercadona|eroski|carrefour|lidl|aldi\b/.test(joined))category='Supermercado';else if(/restaurante|desayuno|comida|cena|men[uú]|manutenci[oó]n/.test(joined))category='Manutención';else if(/gasolina|combustible|gasoil|repostaje/.test(joined))category='Gasolina';else if(/peaje/.test(joined))category='Transporte';else if(/maillot|culote|ropa|sudadera/.test(joined))category='Ropa';else if(/bicicleta|material|casco/.test(joined))category='Material';else if(/inscripci[oó]n/.test(joined))category='Inscripciones';
