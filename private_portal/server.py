@@ -473,8 +473,8 @@ def create_app(test_config=None):
         data=body()
         email=text(data,'email',254).lower()
         name=text(data,'name',100)
-        if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
-            abort(400,'Revisa el nombre y el correo')
+        if not name or not (re.fullmatch(r'[a-z][a-z0-9_-]{2,29}',email) or re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email)):
+            abort(400,'Revisa el nombre y el usuario o correo')
         if g.db.scalar(select(User.id).where(User.email==email).execution_options(shared_resource_lookup=True)):
             abort(409,'Ese usuario ya existe')
         g.db.execute(delete(Invite).where(Invite.team==NETKOM,Invite.email==email,

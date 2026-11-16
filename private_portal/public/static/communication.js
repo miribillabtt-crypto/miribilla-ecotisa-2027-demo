@@ -34,7 +34,7 @@ async function communicationDashboard(content){
    ${teams.map(([id,name])=>`<td><button type="button" data-editorial-view="${key}" data-editorial-team="${id}" aria-label="${label} · ${esc(name)}">Abrir</button></td>`).join('')}</tr>`).join('')}</tbody></table>
    </div><div class="toolbar"><button type="button" class="primary" data-editorial-view="calendar" data-editorial-team="all">Calendario · Todos los equipos</button></div>
    ${me.canInviteCommunication?`<details class="card"><summary>Invitar a Comunicación</summary>
-    <form id="editorialInvite"><div class="grid">${field('Nombre y apellidos','name')}${field('Correo personal de acceso','email','email')}</div>
+    <form id="editorialInvite"><div class="grid">${field('Nombre y apellidos','name')}${field('Usuario o correo de acceso','email')}</div>
     <button type="submit" class="primary">Crear enlace de activación</button></form><div id="editorialInviteResult"></div></details>`:''}`;
   content.querySelectorAll('[data-editorial-view]').forEach(button=>button.onclick=()=>openCommunication(button.dataset.editorialView,button.dataset.editorialTeam));
   bindForm('editorialInvite',async(_,data)=>{

@@ -11,7 +11,7 @@ def test_communication_invitation_and_editable_calendar(env):
     app, _, login, _ = env
     director, headers = login('director')
     invitation = director.post('/api/communication/invite', headers=headers, json={
-        'email': 'editor@example.invalid', 'name': 'Editora', 'role': 'director', 'documents': True,
+        'email': 'editor-user', 'name': 'Editora', 'role': 'director', 'documents': True,
     })
     assert invitation.status_code == 200
     token = invitation.json['token']
@@ -19,7 +19,7 @@ def test_communication_invitation_and_editable_calendar(env):
     assert editor.post('/api/activate/start', json={'token': token}).json['role'] == 'communication'
     password = 'individual-editor-password'
     assert editor.post('/api/activate/finish', json={'token': token, 'password': password}).status_code == 200
-    assert editor.post('/api/login', json={'email': 'editor@example.invalid', 'password': password}).status_code == 200
+    assert editor.post('/api/login', json={'email': 'editor-user', 'password': password}).status_code == 200
     session = editor.get('/api/me').json
     assert session['user']['role'] == 'communication' and not session['user']['documents']
     csrf = {'X-CSRF-Token': session['csrf']}
