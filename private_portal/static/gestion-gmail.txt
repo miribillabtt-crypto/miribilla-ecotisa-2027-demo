@@ -45,7 +45,12 @@ function importarFacturas() {
           if (attempted >= 25) { complete = false; break; }
           attempted++;
           const blob = Gmail.Users.Messages.Attachments.get('me',item.id,part.body.attachmentId);
-          const file = Utilities.newBlob(Utilities.base64DecodeWebSafe(blob.data),'application/pdf',part.filename);
+          let bytes = blob.data;
+          if (typeof bytes === 'string') {
+            const encoded = bytes.replace(/\s/g,'').replace(/-/g,'+').replace(/_/g,'/');
+            bytes = Utilities.base64Decode(encoded.padEnd(Math.ceil(encoded.length / 4) * 4,'='));
+          }
+          const file = Utilities.newBlob(bytes,'application/pdf',part.filename);
           const response = UrlFetchApp.fetch(GESTION_URL,{
             method:'post',
             headers:{Authorization:'Bearer '+key,'X-Gestion-Mailbox':mailbox},
