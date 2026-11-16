@@ -6,7 +6,7 @@ async function gestionPage(content,runOCR=true){
  content.innerHTML=`<h1>Gestión</h1><p>Contabilidad de Miribilla BTT Elkartea · CIF G95613758</p>
  <details class="card"><summary>Conectar Gmail</summary>
  <p>Configura un proyecto de Google Apps Script en cada cuenta y autoriza una vez la lectura de Gmail. El conector busca candidatos de Miribilla y carga el PDF para revisión.</p>
- <ol><li>Copia el <a href="/static/gestion-gmail.txt" target="_blank" rel="noopener">código del conector</a> en un <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">proyecto de Apps Script</a> del buzón correspondiente.</li>
+ <ol><li>Copia el <a href="/static/gestion-gmail.txt" target="_blank" rel="noopener">código del conector</a> en un <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">proyecto de Apps Script</a> del buzón correspondiente. En Configuración, muestra <code>appsscript.json</code> y pega el <a href="/static/gestion-gmail-manifest.txt" target="_blank" rel="noopener">manifiesto de solo lectura</a> en ese archivo.</li>
  <li>En Configuración del proyecto → Propiedades de la secuencia de comandos, añade <code>GESTION_MAILBOX</code> con el correo y <code>GESTION_KEY</code> con la clave generada aquí.</li>
  <li>Ejecuta <code>conectarGestion</code> y autoriza el acceso en Google. El proyecto consultará el correo cada hora.</li></ol>
  <form id="gestionMailKey">${select('Buzón','account',mailAccounts)}<button type="submit">Generar clave de conexión</button></form>

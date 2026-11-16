@@ -1,15 +1,12 @@
-// Copia este código en un proyecto de Google Apps Script por buzón.
 const GESTION_URL = 'https://miribilla-ecotisa-2027-demo.vercel.app/api/gestion/mail-intake';
+const QUERY = 'newer_than:30d has:attachment filename:pdf {subject:factura subject:faktura subject:invoice filename:factura filename:faktura filename:invoice} {G95613758 "Miribilla BTT Elkartea"} -in:sent -in:spam -in:trash';
 
 function conectarGestion() {
-  const options = PropertiesService.getScriptProperties();
-  if (!options.getProperty('GESTION_KEY') || !options.getProperty('GESTION_MAILBOX')) {
-    throw new Error('Configura GESTION_KEY y GESTION_MAILBOX en las propiedades del proyecto.');
-  }
   importarFacturas();
   if (!ScriptApp.getProjectTriggers().some(trigger => trigger.getHandlerFunction() === 'importarFacturas')) {
     ScriptApp.newTrigger('importarFacturas').timeBased().everyHours(1).create();
   }
+  console.log('Importación automática configurada.');
 }
 
 function importarFacturas() {
@@ -19,53 +16,63 @@ function importarFacturas() {
     const options = PropertiesService.getScriptProperties();
     const key = options.getProperty('GESTION_KEY');
     const mailbox = options.getProperty('GESTION_MAILBOX');
-    if (!key || !mailbox) throw new Error('Falta configurar el buzón de Gestión.');
-    const query = 'newer_than:30d has:attachment filename:pdf {subject:factura subject:faktura subject:invoice filename:factura filename:faktura filename:invoice} {G95613758 "Miribilla BTT Elkartea"} -in:sent -in:spam -in:trash';
-    const candidates = GmailApp.search(query, 0, 100);
+    if (!key || !mailbox) throw new Error('Configura GESTION_KEY y GESTION_MAILBOX.');
+    if (Gmail.Users.getProfile('me').emailAddress.toLowerCase() !== mailbox.toLowerCase()) {
+      throw new Error('La cuenta autorizada no coincide con GESTION_MAILBOX.');
+    }
     const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    for (const [name,stamp] of Object.entries(options.getProperties())) {
+      if (name.startsWith('gestion:') && Number(stamp) < cutoff) options.deleteProperty(name);
+    }
+    let pageToken;
+    let attempted = 0;
+    let imported = 0;
     let failures = 0;
-    let sent = 0;
-    candidatesLoop: for (const thread of candidates) {
-      for (const message of thread.getMessages()) {
-        if (message.getDate().getTime() < cutoff) continue;
-        const marker = 'gestion:' + message.getId();
+    do {
+      const page = Gmail.Users.Messages.list('me',{q:QUERY,maxResults:100,pageToken});
+      for (const item of page.messages || []) {
+        const marker = 'gestion:' + item.id;
         if (options.getProperty(marker)) continue;
+        if (attempted >= 25) break;
+        const message = Gmail.Users.Messages.get('me',item.id,{format:'full'});
+        const subject = (message.payload.headers || []).find(header => header.name.toLowerCase()==='subject')?.value || '';
         let complete = true;
-        const attachments = message.getAttachments({includeInlineImages:false, includeAttachments:true});
-        const invoiceSubject = /factura|faktura|invoice/i.test(message.getSubject());
-        for (const attachment of attachments) {
-          const filename = attachment.getName() || '';
-          if (!/\.pdf$/i.test(filename) || /proforma|presupuesto|albar.n|pedido|extracto|receipt|recibo/i.test(filename)) continue;
-          if (!invoiceSubject && !/factura|faktura|invoice/i.test(filename)) continue;
-          if (attachment.getSize() > 4 * 1024 * 1024) {
-            failures++;
-            complete = false;
+        for (const part of facturaParts(message.payload,subject)) {
+          if (part.body.size > 4 * 1024 * 1024) {
+            console.warn('Se ha omitido un PDF de más de 4 MB.');
             continue;
           }
-          if (sent >= 25) break candidatesLoop;
-          sent++;
+          if (attempted >= 25) { complete = false; break; }
+          attempted++;
+          const blob = Gmail.Users.Messages.Attachments.get('me',item.id,part.body.attachmentId);
+          const file = Utilities.newBlob(Utilities.base64DecodeWebSafe(blob.data),'application/pdf',part.filename);
           const response = UrlFetchApp.fetch(GESTION_URL,{
             method:'post',
             headers:{Authorization:'Bearer '+key,'X-Gestion-Mailbox':mailbox},
-            payload:{file:attachment.copyBlob()},
+            payload:{file},
             muteHttpExceptions:true,
             followRedirects:false
           });
           const status = response.getResponseCode();
           if (status === 401) throw new Error('La clave de importación de Gestión no es válida.');
-          if (status !== 200 && status !== 201) {
-            complete = false;
-            failures++;
-          }
+          if (status === 201) imported++;
+          if (status !== 200 && status !== 201) { complete = false; failures++; }
         }
         if (complete) options.setProperty(marker,String(Date.now()));
       }
-    }
-    for (const [name,stamp] of Object.entries(options.getProperties())) {
-      if (name.startsWith('gestion:') && Number(stamp) < cutoff) options.deleteProperty(name);
-    }
-    if (failures) throw new Error(failures+' adjuntos no se pudieron importar. Revisa formato, tamaño o conexión.');
+      pageToken = page.nextPageToken;
+    } while (pageToken && attempted < 25);
+    console.log(imported+' facturas nuevas guardadas pendientes de revisar.');
+    if (failures) throw new Error(failures+' adjuntos no se pudieron importar.');
   } finally {
     lock.releaseLock();
   }
+}
+
+function facturaParts(part,subject) {
+  const name = part.filename || '';
+  const candidate = part.body?.attachmentId && /\.pdf$/i.test(name)
+    && !/proforma|presupuesto|albar.n|pedido|extracto|receipt|recibo/i.test(name)
+    && /factura|faktura|invoice/i.test(name+' '+subject);
+  return [...(candidate ? [part] : []), ...((part.parts || []).flatMap(child => facturaParts(child,subject)))];
 }
