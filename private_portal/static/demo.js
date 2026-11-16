@@ -138,7 +138,14 @@ window.DemoPortal=(()=>{
    throw Error('Esta pantalla no tiene más datos de ejemplo.');
   }
   if(path==='/logout'){stop();return {ok:true};}
-  if(parts[0]==='profile'){Object.assign(state.profiles[parts[1]],data);return {ok:true};}
+  if(parts[0]==='profile'){
+    const {sizes,quantities,clothingExpected,...fields}=data;
+    const profile=state.profiles[parts[1]];
+    Object.assign(profile,fields);
+    if(sizes)profile.sizes={...profile.sizes,...sizes};
+    if(quantities)profile.quantities={...profile.quantities,...quantities};
+    return {ok:true};
+   }
   if(path==='/events'){const event={...data,id:id(),called:[],callStatus:'Borrador'};state.events.push(event);return {ok:true};}
   if(parts[0]==='archive'&&parts[2]==='restore'){const event=state.events.find(item=>item.id===parts[1]);if(event)event.archived=false;const fine=state.fines.find(item=>item.id===parts[1]);if(fine)fine.archived=false;return {ok:true};}
   if(parts[0]==='events'){

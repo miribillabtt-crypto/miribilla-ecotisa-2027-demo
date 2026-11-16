@@ -8,7 +8,7 @@ from cryptography.fernet import Fernet
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.exceptions import HTTPException
 import pyotp
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from PIL import Image
 from roster_import import normalize
 from gestion import can_manage_gestion, register_gestion
@@ -55,6 +55,7 @@ class Attempt(Base):
 ROLES={'director','technician','runner','communication'}
 FINE_TYPES=[('Falta de respeto leve',5),('Falta de respeto moderada',10),('Falta de respeto grave','Expulsión'),('Material en mal estado',5),('Llega 5 minutos tarde',5),('Llega 10 minutos tarde',10),('Llega 15 minutos tarde',15),('No trae ropa adecuada',5),('Otras · 5 €',5),('Otras · 10 €',10)]
 CLOTHES=['Maillot corto','Maillot largo','Culote corto','Culote largo','Gava','Buzo','Chaleco','Pantalón largo','Pantalón corto','Camiseta','Polo','Sudadera','Plumas']
+CLOTHING_SIZES=('XXS','XS','S','M','L','XL','XXL','XXXL')
 def clothing_quantities(profile):
     quantities={item:2 if item=='Camiseta' else 1 for item in CLOTHES}
     quantities.update({item:qty for item,qty in profile.get('quantities',{}).items() if item in CLOTHES})
@@ -125,8 +126,8 @@ def create_app(test_config=None):
                 return fn(*a,**kw)
             return inner
         return dec
-    def runner_target(target):
-        u=g.db.get(User,target)
+    def runner_target(target,lock=False):
+        u=g.db.get(User,target,with_for_update=lock,populate_existing=lock)
         if not u or u.role!='runner': abort(404)
         if g.user.id!=target and g.user.role!='director': abort(403)
         return u
@@ -542,7 +543,12 @@ def create_app(test_config=None):
     @app.post('/api/profile/<target>')
     @require('director','runner')
     def profile_save(target):
-        u=runner_target(target);d=body();p=unseal(u.profile)
+        u=runner_target(target,lock=True);d=body();p=unseal(u.profile)
+        expected=d.pop('clothingExpected',{})
+        if not isinstance(expected,dict) or any(
+            key not in ('sizes','quantities') or not isinstance(values,dict)
+            for key,values in expected.items()
+        ):abort(400)
         allowed={'competitionDays2026','coach','club','sizes','photoConsent','bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'}
         if g.user.id==target or g.user.documents:allowed|={'phone','address','birth','guardian','guardianPhone','iban','bankHolder','guardianEmail','guardian2','guardianPhone2','guardianEmail2','city','zip','province','departureDefault','pickupPoint','firstName','surname','birthYear','dni','dniStatus','uciId','medicationStatus','medicationDetails','allergiesStatus','allergiesDetails','intolerancesStatus','intolerancesDetails'}
         if g.user.role=='director':allowed|={'quantities','category'}
@@ -550,7 +556,7 @@ def create_app(test_config=None):
             if k not in allowed:abort(403)
             if k in ('sizes','quantities'):
                 if not isinstance(v,dict) or any(key not in CLOTHES for key in v):abort(400)
-                if k=='sizes' and any(val not in ['','XXS','XS','S','M','L','XL','XXL','XXXL'] for val in v.values()):abort(400)
+                if k=='sizes' and any(val not in ('',*CLOTHING_SIZES) for val in v.values()):abort(400)
                 if k=='quantities' and any(type(val)!=int or val<0 or val>100 for val in v.values()):abort(400)
             elif k=='category':
                 if not isinstance(v,str) or len(v)>80 or (g.team not in NEW_TEAMS and v not in ('',*OCCIDENT_CATEGORIES)):
@@ -565,7 +571,19 @@ def create_app(test_config=None):
             elif k=='photoConsent':
                 if type(v)!=bool:abort(400)
             elif not isinstance(v,str) or len(v)>250:abort(400)
-            p[k]=v
+            if k in ('sizes','quantities'):
+                original=p.get(k,{})
+                baseline=expected.get(k,{})
+                current=clothing_quantities(p) if k=='quantities' else original
+                for item,value in v.items():
+                    actual=current.get(item,'')
+                    if item in baseline and actual not in (baseline[item],value):
+                        abort(409,'Otra persona modificó la talla o cantidad de '+item+'. Recarga antes de guardar.')
+                changes={item:value for item,value in v.items() if
+                         k=='quantities' or value or (item in baseline and baseline[item]==original.get(item))}
+                p[k]={**original,**changes}
+            else:
+                p[k]=v
         u.profile=seal(p)
         if any(k in d for k in ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar','coach','club']):
             sport={k:p.get(k,'') for k in ['bike','bikeSize','helmet','pedals','coach','club']}
@@ -789,6 +807,72 @@ def create_app(test_config=None):
     def my_clothes():
         profile=unseal(g.user.profile)
         return jsonify(sizes=profile.get('sizes',{}),quantities=clothing_quantities(profile))
+    @app.post('/api/clothes/recover')
+    @require('director')
+    def recover_clothes():
+        from zipfile import BadZipFile, ZipFile
+        from openpyxl.utils.exceptions import InvalidFileException
+        file=request.files.get('file')
+        raw=file.read(1024*1024+1) if file else b''
+        if not raw or len(raw)>1024*1024:abort(400,'Adjunta un Excel .xlsx de hasta 1 MB')
+        entries={}
+        try:
+            with ZipFile(io.BytesIO(raw)) as archive:
+                if sum(item.file_size for item in archive.infolist())>12*1024*1024:
+                    abort(400,'El Excel supera el tamaño admitido')
+            book=load_workbook(io.BytesIO(raw),read_only=True,data_only=True,keep_links=False)
+            try:
+                sheet=next((book[name] for name in ('Dotación por corredor','Detalle') if name in book),None)
+                if sheet is None:abort(400,'El Excel debe incluir Dotación por corredor o Detalle')
+                columns=None
+                for cells in sheet.iter_rows(max_row=10002,max_col=20,values_only=True):
+                    if columns is None:
+                        labels=[str(cell or '').strip().lower() for cell in cells]
+                        if 'corredor' in labels and 'prenda' in labels and any(k in labels for k in ('talla','talla registrada')):
+                            columns=(labels.index('corredor'),labels.index('prenda'),
+                                     labels.index('talla' if 'talla' in labels else 'talla registrada'))
+                        continue
+                    name,item,size=(cells[index] for index in columns)
+                    if isinstance(name,str) and item in CLOTHES and isinstance(size,str) and size.strip().upper() in CLOTHING_SIZES:
+                        entries.setdefault((normalize(name),item),set()).add(size.strip().upper())
+                if columns is None or not entries:abort(400,'No se encontraron tallas utilizables en ese Excel')
+            finally:
+                book.close()
+        except (BadZipFile, InvalidFileException, ValueError, KeyError, OSError):
+            abort(400,'No se pudo leer el Excel')
+        apply=request.form.get('apply')=='1'
+        lookup={}
+        query=select(User).where(User.role=='runner',User.active.is_(True)).order_by(User.id)
+        if apply:query=query.with_for_update().execution_options(populate_existing=True)
+        for rider in g.db.scalars(query):
+            lookup.setdefault(normalize(rider.name),[]).append(rider)
+        profiles={}
+        restored=[]
+        unmatched=conflicts=0
+        for (name,item),sizes in entries.items():
+            riders=lookup.get(name,[])
+            if len(riders)!=1:
+                unmatched+=1
+                continue
+            if len(sizes)!=1:
+                conflicts+=1
+                continue
+            rider=riders[0]
+            if rider not in profiles:profiles[rider]=unseal(rider.profile)
+            profile=profiles[rider]
+            current=profile.setdefault('sizes',{})
+            if current.get(item):continue
+            size=next(iter(sizes))
+            current[item]=size
+            restored.append(dict(rider=rider.name,item=item,size=size))
+        if apply:
+            changed={normalize(row['rider']) for row in restored}
+            for rider,profile in profiles.items():
+                if normalize(rider.name) in changed:
+                    rider.profile=seal(profile)
+                    audit('clothing_sizes_recovered',rider.id)
+        return jsonify(restored=restored,unmatched=unmatched,conflicts=conflicts)
+
     @app.get('/api/clothes/export')
     @require('director')
     def export():

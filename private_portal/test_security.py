@@ -1184,3 +1184,33 @@ def test_netkom_runner_photos_are_saved_and_previewable(env):
   assert preview.status_code==200 and preview.mimetype=='image/jpeg'
   assert preview.headers['Content-Disposition'].startswith('inline')
   assert other.get(url).status_code==403
+
+
+def test_clothing_updates_and_excel_recovery_preserve_saved_sizes(env):
+ app,ids,login,_=env
+ director,h=login('director')
+ runner,rh=login('runner')
+ path='/api/profile/'+ids['runner']
+ assert runner.post(path,json={'sizes':{'Maillot corto':'S','Culote corto':'M'}},headers=rh).status_code==200
+ assert director.post(path,json={'sizes':{'Maillot corto':'','Camiseta':'L'},'quantities':{'Camiseta':0}},headers=h).status_code==200
+ assert runner.post(path,json={'sizes':{'Camiseta':'XL'},'clothingExpected':{'sizes':{'Camiseta':''}}},headers=rh).status_code==409
+ from openpyxl import Workbook
+ book=Workbook()
+ sheet=book.active;sheet.title='Detalle'
+ sheet.append(['Corredor','Prenda','Talla registrada'])
+ sheet.append(['runner','Maillot corto','XL'])
+ sheet.append(['runner','Polo','XS'])
+ sheet.append(['runner','Buzo','M'])
+ sheet.append(['runner','Buzo','L'])
+ sheet.append(['unknown','Polo','M'])
+ out=io.BytesIO();book.save(out)
+ def recover(apply=False):
+  return director.post('/api/clothes/recover',data={'file':(io.BytesIO(out.getvalue()),'tallas.xlsx'),
+                                                   'apply':'1' if apply else '0'},headers=h)
+ assert recover().json=={'restored':[{'rider':'runner','item':'Polo','size':'XS'}],'unmatched':1,'conflicts':1}
+ assert 'Polo' not in runner.get('/api/clothes/mine').json['sizes']
+ assert len(recover(True).json['restored'])==1
+ kit=runner.get('/api/clothes/mine').json
+ assert kit['sizes']=={'Maillot corto':'S','Culote corto':'M','Camiseta':'L','Polo':'XS'}
+ assert kit['quantities']['Camiseta']==0
+ assert recover(True).json['restored']==[]

@@ -610,6 +610,19 @@ async function prepareIdentityFile(file,photo=false){
   throw Error(photo?'Este navegador no puede abrir esa imagen. Guarda una copia en JPG o PNG y vuelve a seleccionarla.':'No se pudo abrir esa foto. Selecciona PDF, JPG o PNG de hasta 4 MB.');
  }finally{URL.revokeObjectURL(url);}
 }
+function clothingChanges(previous,values,includeQuantities=false){
+ const payload={},expected={};
+ for(const [field,value] of Object.entries(values)){
+  if(value===previous[field])continue;
+  const size=field.startsWith('size:');
+  if(!size&&!includeQuantities)continue;
+  const key=size?'sizes':'quantities',item=size?field.slice(5):field;
+  (payload[key]??={})[item]=size?value:Number(value);
+  (expected[key]??={})[item]=size?previous[field]:Number(previous[field]);
+ }
+ if(Object.keys(expected).length)payload.clothingExpected=expected;
+ return payload;
+}
 async function profilePage(c,id){const d=await api('/profile/'+id),p=d.profile;const privateAccess=me.id===id||me.documents;const personalFields=[['Nombre','firstName','text'],['Apellidos','surname','text'],['Año de nacimiento','birthYear','text'],['DNI','dni','text'],...(me.team!=='netkom'?[['Número de licencia / ID UCI','uciId','text']]:[]),['Estado del DNI','dniStatus','text'],['Teléfono','phone','tel'],['Dirección','address','text'],['Fecha de nacimiento','birth','date'],['Tutor/a','guardian','text'],['Teléfono tutor/a','guardianPhone','tel'],['Titular de cuenta','bankHolder','text'],['IBAN','iban','text'],['Email tutor/a','guardianEmail','email'],['Segundo tutor/a','guardian2','text'],['Teléfono segundo tutor/a','guardianPhone2','tel'],['Email segundo tutor/a','guardianEmail2','email'],['Población','city','text'],['Código postal','zip','text'],['Provincia','province','text'],['Salida habitual (Bilbao / Zaragoza)','departureDefault','text'],['Punto de recogida','pickupPoint','text']];
 const healthFields=[
  ['medication','¿Tomas alguna medicación?','¿Cuál?'],
@@ -624,13 +637,15 @@ if(upload){
  upload.querySelector('h2').textContent='1. Escanear y subir documentos';
  addIdentityOCR(upload,profile);
 }
-const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('roster');bindForm('profile',async(f,data)=>{const sizes={};Object.entries(data).filter(([k])=>k.startsWith('size:')).forEach(([k,v])=>sizes[k.slice(5)]=v);const output={club:data.club,coach:data.coach,sizes,photoConsent:f.elements.photoConsent.checked,competitionDays2026:data.competitionDays2026===''?'':Number(data.competitionDays2026)};for(const key of ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'])output[key]=data[key]||'';if(f.elements.category)output.category=data.category;if(privateAccess){
+const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('roster');
+let clothingBaseline=Object.fromEntries(new FormData(profile));
+bindForm('profile',async(f,data)=>{const output={club:data.club,coach:data.coach,...clothingChanges(clothingBaseline,data),photoConsent:f.elements.photoConsent.checked,competitionDays2026:data.competitionDays2026===''?'':Number(data.competitionDays2026)};for(const key of ['bike','bikeSize','helmet','pedals','saddleHeight','saddleToBar'])output[key]=data[key]||'';if(f.elements.category)output.category=data.category;if(privateAccess){
  for(const [,key] of personalFields)output[key]=data[key];
  for(const [key] of healthFields){
   output[key+'Status']=data[key+'Status'];
   output[key+'Details']=data[key+'Details']||'';
  }
-}await api('/profile/'+id,'POST',output);message('Ficha guardada.');});bindForm('upload',async f=>{
+}await api('/profile/'+id,'POST',output);clothingBaseline=data;message('Ficha guardada.');});bindForm('upload',async f=>{
  const data=new FormData(f);
  data.set('file',await prepareIdentityFile(f.elements.file.files[0]));
  await api('/documents/'+id,'POST',data,f);await listDocuments(id);message('Documento privado guardado.');f.reset();});for(const kind of ['portrait','action'])bindForm('photo-'+kind,async form=>{
@@ -665,6 +680,10 @@ async function clothesPage(c){
     <div class="toolbar"><button class="primary" type="button" id="clothesExport">Guardar y descargar dotación y extras · Excel</button>
     <button type="button" id="clothingShop">Gestionar tienda y precios</button>
     <button type="button" id="clothingCharges">Ver cobros por corredor</button></div>
+    <details class="card"><summary>Recuperar tallas de un Excel anterior</summary>
+    <p>Se buscan corredores activos del equipo por nombre completo. Se rellenan únicamente las tallas vacías.</p>
+    <form id="recoverClothing"><label>Excel anterior<input name="file" type="file" accept=".xlsx" required></label>
+    <button type="submit">Buscar tallas recuperables</button></form><div id="clothesRecovery"></div></details>
     <p id="clothesTotal"></p>
     <p>Compras extra registradas: ${activeOrders.length} pedidos · ${euros(activeOrders.reduce((sum,order)=>sum+order.amount,0))}</p>
     <div class="note">Dotación del equipo: una unidad de cada prenda y dos camisetas por defecto. Se respetan las cantidades ajustadas y puedes poner 0 para excluir una prenda. Despliega el nombre de cada corredor para editar sus tallas y cantidades. Las compras extra muestran los pedidos de la tienda y su cargo en la cuenta del corredor. El Excel tiene hojas independientes para la dotación y las compras extra.</div>
@@ -680,6 +699,25 @@ async function clothesPage(c){
     </form><section><h3>Compras extra · A cargo del corredor</h3>
       ${extraClothingOrders(orders.filter(order=>order.rider===r.id))}
     </section></details>`).join('');
+  bindForm('recoverClothing',async form=>{
+    const file=form.elements.file.files[0];
+    const payload=new FormData();payload.set('file',file);
+    const preview=await api('/clothes/recover','POST',payload);
+    const output=c.querySelector('#clothesRecovery');
+    output.innerHTML=`<p>${preview.restored.length} tallas recuperables · ${preview.unmatched} sin coincidencia única · ${preview.conflicts} con valores distintos en el Excel.</p>
+      ${preview.restored.length?`<details><summary>Ver tallas para recuperar</summary><ul>${preview.restored.map(row=>`<li>${esc(row.rider)} · ${esc(row.item)} · ${esc(row.size)}</li>`).join('')}</ul></details>
+      <button type="button">Rellenar solo tallas vacías</button>`:''}`;
+    const apply=output.querySelector('button');
+    if(apply)apply.onclick=async()=>{
+      apply.disabled=true;
+      try{
+        payload.set('apply','1');
+        const result=await api('/clothes/recover','POST',payload);
+        await clothesPage(c);
+        message(`${result.restored.length} tallas recuperadas.`);
+      }catch(error){apply.disabled=false;message(error.message);}
+    };
+  });
   c.querySelector('#clothingShop').onclick=()=>navigate('shop');
   c.querySelector('#clothingCharges').onclick=()=>navigate('charges');
   const forms=[...c.querySelectorAll('[data-clothing]')];
@@ -693,15 +731,13 @@ async function clothesPage(c){
     }).join('')}</tbody></table>`;
   };
   showTotal();
-  const snapshot=form=>JSON.stringify(Object.fromEntries(new FormData(form)));
+  const snapshot=form=>Object.fromEntries(new FormData(form));
   const saved=new Map(forms.map(form=>[form,snapshot(form)]));
   const save=async form=>{
     const values=snapshot(form);
-    if(values===saved.get(form))return;
-    const entries=Object.entries(JSON.parse(values));
-    const quantities=Object.fromEntries(entries.filter(([item])=>!item.startsWith('size:')).map(([item,value])=>[item,Number(value)]));
-    const sizes=Object.fromEntries(entries.filter(([item])=>item.startsWith('size:')).map(([item,value])=>[item.slice(5),value]));
-    await api('/profile/'+form.dataset.clothing,'POST',{quantities,sizes});
+    const changes=clothingChanges(saved.get(form),values,true);
+    if(!Object.keys(changes).length)return;
+    await api('/profile/'+form.dataset.clothing,'POST',changes);
     saved.set(form,values);
   };
   const run=async action=>{
