@@ -23,6 +23,13 @@ async function dashboardPage(c){
   c.querySelector('#quickVehicleKm').onclick=()=>navigate('vehiclelogs');
  }
  return;}
+ if(teamConsultation()){
+  c.innerHTML=`<h1>${esc(teamName(me.team))}</h1><p>Vista de consulta.</p><div class="grid direction-actions">
+   ${directionSections().slice(1).flatMap(([,items])=>items).map(([id,label])=>`<button type="button" class="tile" data-shortcut="${id}">${label}</button>`).join('')}
+  </div>`;
+  c.querySelectorAll('[data-shortcut]').forEach(button=>button.onclick=()=>navigate(button.dataset.shortcut));
+  return;
+ }
  const s=await api('/summary');
  const actions=[
   ['calendar','Calendario','Carreras, convocatorias, viajes y gastos por actividad'],
@@ -350,7 +357,7 @@ function vehicleAvailability(container,vehicles,events,bookings){
   section.innerHTML=`<details open><summary>Reservas compartidas de vehículos</summary>
     <label>Consultar día<input type="date" id="vehicleDay" value="${esc(vehicleBookingDay||calendarDateKey(new Date()))}"></label>
     <div id="vehicleBookings"></div><div id="vehicleBookingDates"></div></details>
-    ${me.role==='director'&&vehicles.length?`<details><summary>Reservar sin actividad</summary>
+    ${me.role==='director'&&!teamConsultation()&&vehicles.length?`<details><summary>Reservar sin actividad</summary>
      <form id="standaloneVehicleBooking">
       <div class="grid">
        ${select('Vehículo','vehicle',[['','Selecciona un vehículo'],...vehicles.map(vehicle=>[vehicle.id,vehicle.name])])}
@@ -402,7 +409,7 @@ function vehicleAvailability(container,vehicles,events,bookings){
         const activity=events.find(event=>event.id===row.event);
         return activity?team+' · '+activity.name:row.direct?team+' · '+vehicleUsage(row):team;
       }))];
-      const direct=matching.filter(row=>row.direct&&row.id&&me.role==='director').map(row=>
+      const direct=matching.filter(row=>row.direct&&row.id&&me.role==='director'&&!teamConsultation()).map(row=>
         `<div class="row"><small>${esc(row.reason||'Reserva sin actividad')}</small><button type="button" data-edit-reservation="${esc(row.id)}">Editar reserva</button><button type="button" data-cancel-reservation="${esc(row.id)}">Cancelar reserva</button></div>`
       ).join('');
       return `<div class="row"><strong>${esc(vehicle.name)}</strong><span class="resource-state ${labels.length?'assigned':'available'}">${labels.length?'Reservado · '+labels.map(esc).join(', '):'Libre'}</span>${direct}</div>`;
@@ -547,7 +554,7 @@ async function resourceMatrix(c,section){
   const label=manual?.status||event.responses?.[resource.user]||'Por confirmar';
   return {label,style:label==='No disponible'?'unavailable':label==='Disponible'||label==='Libre'?'available':'pending'};
  }
- c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
+ c.innerHTML=`<h2>${section==='all'?'Disponibilidad y convocatorias':section==='staff'?'Disponibilidad de técnicos por carrera':'Disponibilidad de vehículos por carrera'}</h2>${section==='all'||teamConsultation()?'':`<button type="button" id="manageResources">Gestionar fichas de ${section==='staff'?'técnicos':'vehículos'}</button>`}
   ${section==='staff'&&me.role==='director'&&me.team==='netkom'?`<details class="card"><summary>Altas y contraseñas de técnicos</summary>
    <form id="createTechnician"><label>Nombre y apellidos<input name="name" maxlength="150" required></label>
     <button class="primary" type="submit">Guardar técnico y crear acceso</button></form>
@@ -562,7 +569,7 @@ async function resourceMatrix(c,section){
    <label>Mes<input type="month" id="resourceMonth"></label><button type="button" id="resourceClear">Ver todo</button></div>
   ${section!=='staff'?'<div class="toolbar resource-legend"><span class="resource-state available">Libre</span><span class="resource-state assigned">Reservado</span></div>':''}
   ${section!=='vehicles'?'<div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>':''}
-  <p>Abre una actividad pulsando su nombre.${section!=='staff'?' Las reservas del viaje se modifican en su ficha.':''}</p>
+  <p>Abre una actividad pulsando su nombre.${section!=='staff'&&!teamConsultation()?' Las reservas del viaje se modifican en su ficha.':''}</p>
   <div id="resourceTables"></div>`;
  const host=c.querySelector('#resourceTables');
  const search=c.querySelector('#resourceSearch'),month=c.querySelector('#resourceMonth');
@@ -628,7 +635,7 @@ async function resourceMatrix(c,section){
      return `<tr><th scope="row"><small>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</small><button type="button" data-resource-event="${esc(event.id)}">${esc(event.name)}</button></th>
     ${cols.map(resource=>{
      const cell=status(event,resource,kind);
-     return `<td class="resource-cell ${cell.style}">${me.role==='director'&&!cell.fixed?`<select data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
+     return `<td class="resource-cell ${cell.style}">${me.role==='director'&&!teamConsultation()&&!cell.fixed?`<select data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
        ${(kind==='vehicles'?['Libre','Reservado']:['Disponible','No disponible','Por confirmar']).map(label=>`<option ${cell.label===label?'selected':''}>${label}</option>`).join('')}
       </select>`:`<span>${esc(cell.label)}</span>`}${cell.note?`<small>${esc(cell.note)}</small>`:''}</td>`;
     }).join('')}</tr>`;}).join('')||`<tr><td colspan="${cols.length+1}">No hay registros con estos filtros.</td></tr>`}</tbody></table></div>`:'<p>Aún no hay recursos registrados. Añádelos desde sus fichas.</p>'}</section>`;

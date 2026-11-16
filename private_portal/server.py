@@ -168,6 +168,11 @@ def create_app(test_config=None):
                 g.db.info['team']=g.team
         if request.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS') and g.login:
             if not secrets.compare_digest(request.headers.get('X-CSRF-Token',''),g.login.csrf):abort(403,'Recarga la sesión')
+            if (g.user.role=='director' and g.team!=NETKOM and
+                    request.path not in ('/api/team','/api/logout','/api/login',
+                                         '/api/activate/start','/api/activate/finish')):
+                abort(403,'Este equipo está en modo consulta. Gestiona los recursos desde Netkom.')
+
     @app.after_request
     def after(response):
         response.headers['Cache-Control']='no-store'

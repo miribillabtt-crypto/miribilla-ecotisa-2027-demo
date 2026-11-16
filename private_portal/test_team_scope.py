@@ -1,7 +1,16 @@
 from datetime import date,timedelta
 from test_security import env
-from server import User
+from server import User, Record, Invite, digest
+import json
+import time
 from werkzeug.security import generate_password_hash
+
+def seed_record(app, team, kind, data):
+    with app.extensions['db_sessions'].begin() as db:
+        row=Record(team=team,kind=kind,data=app.extensions['cipher'].encrypt(json.dumps(data).encode()))
+        db.add(row)
+        db.flush()
+        return row.id
 
 def test_occident_isolated_and_shared(env):
     app,ids,login,_=env
@@ -37,14 +46,15 @@ def test_occident_isolated_and_shared(env):
     assert client.get('/api/modules/staff').json['records'][0]['id']==staff
     assert client.post('/api/events',json={'name':'stale'},headers=headers).status_code==403
     headers={'X-CSRF-Token':client.get('/api/me').json['csrf']}
-    assert client.post('/api/events/'+event+'/details',json={'name':'changed'},headers=headers).status_code==404
-    assert client.post('/api/space-reservations',json=reservation,headers=headers).status_code==409
+    assert client.post('/api/events/'+event+'/details',json={'name':'changed'},headers=headers).status_code==403
+    assert client.post('/api/space-reservations',json=reservation,headers=headers).status_code==403
     assert client.get('/api/space-reservations?date='+day).json['reservations'][0]['team']=='netkom'
-    assert client.post('/api/events',json={'name':'Carrera Occident','date':day},headers=headers).status_code==200
-    other=client.get('/api/events').json['events'][0]['id']
-    assert client.post('/api/modules/travel',json={'event':other,'vehicles':[vehicle]},headers=headers).status_code==409
-    assert client.post('/api/modules/travel',json={'event':other,'staff':[staff]},headers=headers).status_code==409
-    token=client.post('/api/occident/administrator-invite',json={},headers=headers).json['token']
+    assert client.post('/api/events',json={'name':'Carrera Occident','date':day},headers=headers).status_code==403
+    seed_record(app,'occident','event',dict(name='Carrera Occident',date=day,called=[]))
+    token='existing-occident-invite'
+    with app.extensions['db_sessions'].begin() as db:
+        db.add(Invite(team='occident',token=digest(token),email='occident.alextoledo',name='Alex Toledo',
+                      role='director',documents=True,secret=profile,expires=int(time.time())+3600))
     alex=app.test_client()
     assert alex.post('/api/activate/start',json={'token':token}).json['name']=='Alex Toledo'
     password='another-password-for-testing'
@@ -76,9 +86,10 @@ def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):
 
     vehicle=post('modules/vehicle',{'name':'Furgo'}).json['id']
     assert post('team',{'team':'occident'}).status_code==200
-    occident=activity('Privada Occident','2027-03-01','2027-03-03')
+    occident=seed_record(app,'occident','event',dict(name='Privada Occident',date='2027-03-01',endDate='2027-03-03',called=[]))
     reserve={'event':occident,'resource':vehicle,'status':'Reservado'}
-    assert post('resource-availability',reserve).status_code==200
+    assert post('resource-availability',reserve).status_code==403
+    booking=seed_record(app,'occident','system:resource-availability',reserve)
 
     assert post('team',{'team':'netkom'}).status_code==200
     assert client.get('/api/events').json['events']==[]
@@ -89,7 +100,10 @@ def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):
     assert post('modules/travel',{'event':netkom,'vehicles':[vehicle]}).status_code==409
 
     assert post('team',{'team':'occident'}).status_code==200
-    assert post('resource-availability',dict(reserve,status='Libre')).status_code==200
+    assert post('resource-availability',dict(reserve,status='Libre')).status_code==403
+    with app.extensions['db_sessions'].begin() as db:
+        db.info['team']='occident'
+        db.delete(db.get(Record,booking))
     assert post('team',{'team':'netkom'}).status_code==200
     assert client.get('/api/resource-availability').json['vehicleBookings']==[]
     assert post('modules/travel',{'event':netkom,'vehicles':[vehicle]}).status_code==200
@@ -110,7 +124,6 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
         return client.open('/api/'+path,method=method,json=data,
                            headers={'X-CSRF-Token':client.get('/api/me').json['csrf']})
 
-    assert change('POST','team',{'team':'occident'}).status_code==200
     vehicle=change('POST','modules/vehicle',{'name':'Furgo'}).json['id']
     draft={'vehicle':vehicle,'date':'2027-05-01','endDate':'2027-05-02','reason':'Taller','usage':'trabajo'}
     assert change('POST','vehicle-reservations',dict(draft,endDate='2027-04-30')).status_code==400
@@ -121,12 +134,13 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
     assert change('PUT',path,dict(draft,reason='Modificada')).status_code==200
     own=client.get('/api/resource-availability').json['vehicleBookings'][0]
     assert own['id']==created.json['id'] and own['reason']=='Modificada' and own['usage']=='trabajo'
-    assert change('POST','team',{'team':'netkom'}).status_code==200
+    assert change('POST','team',{'team':'occident'}).status_code==200
     shared=client.get('/api/resource-availability').json['vehicleBookings']
-    assert shared==[{'team':'occident','event':None,'date':'2027-05-01','endDate':'2027-05-02',
+    assert shared==[{'team':'netkom','event':None,'date':'2027-05-01','endDate':'2027-05-02',
                     'vehicles':[vehicle],'direct':True,'usage':'trabajo'}]
-    assert change('DELETE',path).status_code==404
-    assert change('PUT',path,draft).status_code==404
+    assert change('DELETE',path).status_code==403
+    assert change('PUT',path,draft).status_code==403
+    assert change('POST','team',{'team':'netkom'}).status_code==200
     assert change('POST','vehicle-reservations',dict(draft,date='2027-05-02')).status_code==409
     assert change('POST','events',{'name':'Carrera','date':'2027-05-02'}).status_code==200
     event=client.get('/api/events').json['events'][0]['id']
@@ -134,9 +148,7 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
     assert change('POST','modules/travel',trip).status_code==409
     technician,h=login('technician')
     assert technician.post('/api/vehicle-reservations',json=draft,headers=h).status_code==403
-    assert change('POST','team',{'team':'occident'}).status_code==200
     assert change('DELETE',path).status_code==200
-    assert change('POST','team',{'team':'netkom'}).status_code==200
     assert change('POST','modules/travel',trip).status_code==200
     assert change('POST','vehicle-reservations',draft).status_code==409
     assert change('POST','vehicle-reservations',dict(draft,date='2027-05-03',endDate='')).status_code==201
@@ -156,22 +168,25 @@ def test_school_and_surne_start_separate_and_share_fleet(env):
 
     vehicle=post('modules/vehicle',{'name':'Furgo'}).json['id']
     draft={'vehicle':vehicle,'date':'2027-07-01','usage':'trabajo'}
-    assert post('team',{'team':'escuela'}).status_code==200
-    assert client.get('/api/me').json['team']=='escuela'
-    assert client.get('/api/events').json['events']==[]
-    assert client.get('/api/roster').json['riders']==[]
-    rider=post('roster',{'firstName':'Deportista','surname':'Escuela'}).json['rider']['id']
-    assert post('profile/'+rider,{'category':'Infantil'}).status_code==200
-    assert client.get('/api/roster').json['riders'][0]['category']=='Infantil'
-    assert post('events',{'name':'Actividad de Escuela','date':draft['date']}).status_code==200
+    staff=post('modules/staff',{'name':'Técnico común'}).json['id']
     assert post('vehicle-reservations',draft).status_code==201
-
-    for team in ['surne','occident','netkom']:
+    with app.extensions['db_sessions'].begin() as db:
+        profile=app.extensions['cipher'].encrypt(b'{"category":"Infantil"}')
+        db.add(User(id='escuela-rider',team='escuela',name='Deportista Escuela',role='runner',profile=profile))
+    seed_record(app,'escuela','event',dict(name='Actividad de Escuela',date=draft['date'],called=[]))
+    for team in ['escuela','surne','occident','netkom']:
         assert post('team',{'team':team}).status_code==200
         assert client.get('/api/me').json['team']==team
-        assert client.get('/api/events').json['events']==[]
-        assert client.get('/api/profile/'+rider).status_code==404
-        assert client.get('/api/resource-availability').json['vehicleBookings'][0]['team']=='escuela'
-        assert post('vehicle-reservations',draft).status_code==409
+        assert client.get('/api/modules/staff').json['records'][0]['id']==staff
+        assert client.get('/api/modules/vehicle').json['records'][0]['id']==vehicle
+        events=client.get('/api/events').json['events']
+        if team=='escuela':
+            assert events[0]['name']=='Actividad de Escuela'
+            assert client.get('/api/roster').json['riders'][0]['category']=='Infantil'
+        else:
+            assert events==[]
+            assert client.get('/api/profile/escuela-rider').status_code==404
+        assert client.get('/api/resource-availability').json['vehicleBookings'][0]['team']=='netkom'
+        assert post('vehicle-reservations',draft).status_code==(409 if team=='netkom' else 403)
     director,h=login('director')
     assert director.post('/api/team',json={'team':'surne'},headers=h).status_code==403

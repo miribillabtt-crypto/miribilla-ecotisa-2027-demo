@@ -64,6 +64,9 @@ def test_gestion(env):
     archive='/api/gestion/'+entry+'/archive'
     csrf={'X-CSRF-Token':browser.get('/api/me').json['csrf']}
     assert director.post(archive,json={},headers=h).status_code==403
+    assert browser.post(archive,json={},headers=csrf).status_code==403
+    assert browser.post('/api/team',json={'team':'netkom'},headers=csrf).status_code==200
+    csrf={'X-CSRF-Token':browser.get('/api/me').json['csrf']}
     assert browser.post(archive,json={},headers=csrf).status_code==200
     overview=browser.get('/api/gestion').json
     assert entry not in [row['id'] for row in overview['rows']]

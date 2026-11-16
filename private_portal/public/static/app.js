@@ -13,7 +13,16 @@ function bindForm(id,fn){const form=document.getElementById(id);if(!form)return;
 function login(){app.innerHTML=`<main class="auth"><h1>Entrar al equipo</h1><p>Introduce tu usuario o correo y tu contraseña.</p><form method="post" id="login" class="card">${field('Usuario o correo','email','text')}${field('Contraseña','password','password')}<label class="checkline"><input type="checkbox" name="remember"> Recordarme en este dispositivo durante 30 días</label><button type="submit" class="primary">Entrar</button></form><small>Alta por invitación de Dirección. Si has perdido el acceso, solicita un nuevo enlace al responsable del equipo.</small></main>`;document.querySelector('[name=password]').autocomplete='current-password';document.querySelector('[name=password]').minLength=4;document.querySelector('[name=email]').autocomplete='username';document.querySelector('[name=email]').autocapitalize='none';document.querySelector('[name=email]').spellcheck=false;bindForm('login',async(_,d)=>{await api('/login','POST',d);await init();});}
 async function activation(token){activationToken=token;const data=await api('/activate/start','POST',{token});app.innerHTML=`<main class="auth"><h1>Activar acceso · ${esc(roles[data.role])}</h1><div class="card"><strong>${esc(data.name)}</strong>${data.chooseEmail?'':`<p>${esc(data.email)}</p>`}<form method="post" id="activate">${data.chooseEmail?field('Tu correo electrónico','email','email'):''}${field('Contraseña personal · mínimo 6 caracteres','password','password')}${field('Repetir contraseña','repeat','password')}<button class="primary" type="submit">Activar mi usuario</button></form></div></main>`;bindForm('activate',async(_,d)=>{if(d.password!==d.repeat)throw Error('Las contraseñas no coinciden');await api('/activate/finish','POST',{token:activationToken,password:d.password,email:d.email});activationToken='';login();message('Cuenta activada. Ya puedes entrar con tu correo y contraseña.');});}
 
+function teamConsultation(){
+ return me.role==='director'&&me.team!=='netkom';
+}
 function directionSections(){
+ if(teamConsultation())return [
+  ['Inicio',[['home','Inicio']]],
+  ['Equipo',[['roster','Corredores']]],
+  ['Calendario',[['calendar','Calendario']]],
+  ['Recursos compartidos',[['resources','Técnicos'],['vehicles','Vehículos']]],
+ ];
  return [
   ['Inicio',[['home','Inicio']]],
   ['Organización',[['organization','Organización'],['spaces','Reservas de espacios']]],
@@ -40,7 +49,7 @@ function directionSubnav(sections){
  return `<div class="section-navigation"><strong>${title}</strong><div class="section-links" aria-label="Apartados de ${title}">${items.map(([id,label])=>`<button type="button" data-page="${id}" ${page===id?'aria-current="page" class="active"':''}>${label}</button>`).join('')}</div></div>`;
 }
 function shell(){const mobile=window.matchMedia?.('(max-width: 800px)').matches;const sections=me.role==='director'?directionSections():null;let groups=[];if(me.role==='runner')groups=[['Mi área',[['home','Inicio'],['calendar','Calendario del equipo'],['calls','Mis convocatorias'],['planning','Mi planning'],['profile','Mis datos y documentos'],['results','Mis resultados'],['days','Mis días de actividad'],['charges','Mis gastos y recibos'],['myclothes','Mi ropa'],['shop','Tienda'],['fines','Mis multas'],['publications','Mis publicaciones']]]];else if(me.role==='technician')groups=[['Área técnica',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi disponibilidad'],['calls','Convocatorias'],['planning','Planning y medios'],['resources','Disponibilidad de técnicos'],['spaces','Reservas de espacios'],['equipment','Material y medidas'],['results','Resultados'],['days','Días de actividad']]],['Vehículos',[['vehicles','Reservas'],['vehiclefiles','Fichas de vehículos'],['vehiclelogs','Kilómetros e historial']]]];else groups=[['Comunicación',[['home','Inicio'],['publications','Generar publicaciones'],['photos','Fotos autorizadas'],['whatsapp','Avisos por WhatsApp']]]];app.innerHTML=`<div class="portal-layout"><aside><div class="identity"><strong>${esc(me.name)}</strong><small>${esc(roles[me.role])}</small></div><button type="button" id="mobileMenu" aria-expanded="false" aria-controls="portalNavigation">☰ Menú</button><div id="portalNavigation"><nav aria-label="Menú del portal">${sections?directionNavigation(sections):groups.map(([title,items])=>`<details ${!mobile||items.some(([id])=>id===page)?'open':''}><summary>${title}</summary>${items.map(([id,label])=>`<button data-page="${id}" ${page===id?'aria-current="page"':''} class="${page===id?'active':''}">${label}</button>`).join('')}</details>`).join('')}</nav><button id="logout">Cerrar sesión</button></div></aside>
-${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${['director','technician'].includes(me.role)?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';vehicleBookingDay='';updateTeamHeader();login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
+${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${(!teamConsultation()&&['director','technician'].includes(me.role))?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'&&!teamConsultation()?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';vehicleBookingDay='';updateTeamHeader();login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
 menu.onclick=()=>{
  const expanded=menu.getAttribute('aria-expanded')==='true';
  menu.setAttribute('aria-expanded',String(!expanded));
@@ -100,6 +109,7 @@ window.addEventListener('message',event=>{
  }
 });
 async function navigate(next){
+ if(teamConsultation()&&!directionSections().some(([,items])=>items.some(([key])=>key===next)))next='home';
 
  page=(me.role==='director'&&['calls','planning'].includes(next))||(me.role==='runner'&&next==='mine')?'calendar':next;message('');const content=shell();if(window.matchMedia?.('(max-width: 800px)').matches)window.scrollTo(0,0);try{if(page==='home'){await dashboardPage(content);}else if(page==='organization')organizationPage(content);else if(page==='gestion')await gestionPage(content);else if(page==='conta')await teamAccountingPage(content);else if(featureViews[page]){await featureViews[page](content);}else if(page==='users'){await usersPage(content);addBulkUserImport(content);}else if(page==='calendar'||page==='mine')await calendarPage(content);else if(page==='profile')await profilePage(content,me.id);else if(page==='roster')await rosterPage(content);else if(page==='clothes')await clothesPage(content);else if(page==='myclothes')await myClothesPage(content);else if(page==='fines')await finesPage(content);else if(page==='photos')await photosPage(content);else if(page==='audit'){const d=await api('/audit');content.innerHTML='<h1>Registro de accesos y cambios</h1><div class="card scroll"><table><thead><tr><th>Fecha</th><th>Acción</th><th>Usuario</th><th>Referencia</th></tr></thead><tbody>'+d.entries.map(r=>`<tr><td>${esc(new Date(r.at*1000).toLocaleString('es-ES'))}</td><td>${esc(r.action)}</td><td>${esc(r.user||'Acceso no identificado')}</td><td>${esc(r.target)}</td></tr>`).join('')+'</tbody></table></div>';}}catch(e){message(e.message);}}
 function inviteLink(token){return location.origin+'/#activar='+encodeURIComponent(token);}
@@ -233,7 +243,7 @@ function riderCalendar(c,events){
  render();
 }
 async function calendarPage(c,selectedId){
-  const director=me.role==='director';
+  const director=me.role==='director'&&!teamConsultation();
   const availableRole=['runner','technician'].includes(me.role);
   const {events}=await api('/events');
   const runner=me.role==='runner';
@@ -249,9 +259,23 @@ async function calendarPage(c,selectedId){
   if(selectedId&&!event)throw Error('La actividad ya no está disponible. Vuelve a cargar el calendario.');
   if(event){
     if(activityMonth(event))calendarMonth=activityMonth(event);
-    const riders=director?(await api('/roster')).riders:[];
+    const riders=(director||teamConsultation())?(await api('/roster')).riders:[];
     const responses=event.responses||{};
     const called=event.called||[];
+    if(teamConsultation()){
+      const [travel,staff,vehicles]=await Promise.all([api('/modules/travel'),api('/modules/staff'),api('/modules/vehicle')]);
+      const trip=travel.records.find(item=>item.event===event.id);
+      const notes=[['Lugar',event.place],['Actividad',event.notes],['Salida Bilbao',trip?.departureBilbao],['Salida Zaragoza',trip?.departureZaragoza],['Hotel',trip?.hotel],['Dirección del hotel',trip?.hotelAddress],['Punto de encuentro',trip?.meeting],['Planning',trip?.plan],
+       ['Técnicos',staff.records.filter(item=>trip?.staff?.includes(item.id)).map(item=>item.name).join(', ')],
+       ['Vehículos',vehicles.records.filter(item=>trip?.vehicles?.includes(item.id)).map(item=>item.name).join(', ')]];
+      c.innerHTML=`<button type="button" id="backCalendar">Volver al calendario</button><article class="card">
+       <h1>${esc(event.name)}</h1><p>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</p>
+       ${notes.filter(([,value])=>value).map(([label,value])=>`<p><strong>${label}</strong> · ${esc(value)}</p>`).join('')}
+       <h2>Convocatoria</h2><p>${riders.filter(rider=>called.includes(rider.id)).map(rider=>esc(rider.name)).join(', ')||'Sin corredores seleccionados.'}</p>
+      </article>`;
+      c.querySelector('#backCalendar').onclick=()=>calendarPage(c).catch(error=>message(error.message));
+      return;
+    }
     c.innerHTML=`<button type="button" id="backCalendar">Volver al calendario</button>
       <article class="card"><h1>${esc(event.name)}</h1>
       <p>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''} · ${esc(event.place||'Lugar por confirmar')}</p>
@@ -477,6 +501,26 @@ function rosterGroups(riders){
 async function rosterPage(c){
   const [activeResult,inactiveResult]=await Promise.all([api('/roster'),api('/roster?status=inactive')]);
   roster=activeResult.riders;
+  if(teamConsultation()){
+   c.innerHTML=`<h1>Corredores · ${esc(teamName(me.team))}</h1><label>Buscar corredor<input type="search" id="rosterConsultSearch"></label>
+    <div id="rosterConsultResults">${rosterGroups(roster).filter(group=>group.riders.length).map(group=>`<section class="card" data-search-group><h2>${esc(group.label)}</h2>
+     ${group.riders.map(row=>`<p data-search-name="${esc(row.name)}"><button type="button" data-consult-rider="${esc(row.id)}">${esc(row.name)}</button></p>`).join('')}</section>`).join('')}
+     <p data-no-matches>No hay corredores que coincidan.</p></div>`;
+   bindNameSearch(c.querySelector('#rosterConsultSearch'),c.querySelector('#rosterConsultResults'));
+   c.querySelectorAll('[data-consult-rider]').forEach(button=>button.onclick=async()=>{
+    try{
+     const rider=roster.find(item=>item.id===button.dataset.consultRider);
+     const {profile}=await api('/profile/'+encodeURIComponent(rider.id));
+     const labels={birthYear:'Año de nacimiento',birth:'Fecha de nacimiento',category:'Categoría',uciId:'Número de licencia / ID UCI',dni:'DNI',dniStatus:'Estado del DNI',phone:'Teléfono',address:'Dirección',city:'Población',guardian:'Tutor/a',guardianPhone:'Teléfono tutor/a',guardianEmail:'Email tutor/a',guardian2:'Segundo tutor/a',guardianPhone2:'Teléfono segundo tutor/a',guardianEmail2:'Email segundo tutor/a',bankHolder:'Titular de cuenta',iban:'IBAN',coach:'Entrenador',club:'Club',competitionDays2026:'Días de competición en 2026',bike:'Bicicleta',bikeSize:'Talla de bicicleta',helmet:'Casco',pedals:'Pedales',saddleHeight:'Altura de sillín',saddleToBar:'Distancia del sillín al manillar',medicationStatus:'Medicación',medicationDetails:'Medicación indicada',allergiesStatus:'Alergias',allergiesDetails:'Alergias indicadas',intolerancesStatus:'Intolerancias',intolerancesDetails:'Intolerancias indicadas'};
+     c.innerHTML=`<button type="button" id="rosterConsultBack">Volver a corredores</button><section class="card"><h1>${esc(rider.name)}</h1><dl>
+      ${Object.entries(labels).filter(([key])=>profile[key]||profile[key]===0).map(([key,label])=>`<dt>${label}</dt><dd>${esc(profile[key])}</dd>`).join('')}</dl>
+      ${Object.values(profile.sizes||{}).some(Boolean)?`<h2>Tallas</h2><ul>${Object.entries(profile.sizes).filter(([,size])=>size).map(([item,size])=>`<li>${esc(item)} · ${esc(size)}</li>`).join('')}</ul>`:''}</section><div id="documents" class="card"></div>`;
+     c.querySelector('#rosterConsultBack').onclick=()=>navigate('roster');
+     await listDocuments(rider.id);
+    }catch(error){message(error.message);}
+   });
+   return;
+  }
   const inactive=inactiveResult.riders;
   const accounts=me.owner?(await api('/users')).users:[];
   const eligible=new Set(accounts.filter(u=>u.active&&u.role==='runner'&&!u.accountReady&&!u.email).map(u=>u.id));
@@ -595,7 +639,7 @@ const back=c.querySelector('#backToRoster');if(back)back.onclick=()=>navigate('r
   form.reset();
   message(kind==='portrait'?'Foto con equipación guardada.':'Foto en bicicleta guardada.');
 });await listDocuments(id);}
-async function listDocuments(id){const d=await api('/documents/'+id);document.getElementById('documents').innerHTML='<h2>Archivos registrados</h2>'+(d.documents.map(f=>`<div class="row">${['portrait','action'].includes(f.kind)?`<img class="rider-photo-thumb" src="/api/file/${encodeURIComponent(f.id)}?preview=1" alt="${f.kind==='portrait'?'Foto con equipación':'Foto en bicicleta'}" loading="lazy">`:''}<span>${esc(({contrato_club:'Contrato del club',dni:'DNI · anverso',dni_reverso:'DNI · reverso',licencia:'Licencia federativa · anverso',licencia_reverso:'Licencia federativa · reverso',portrait:'Foto con equipación',action:'Foto en bicicleta'})[f.kind]||f.kind)} · ${Math.round(f.size/1024)} KB</span><div><a href="/api/file/${f.id}">Descargar</a> <button data-delete-file="${f.id}">Eliminar</button></div></div>`).join('')||'No hay documentos registrados.');document.querySelectorAll('[data-delete-file]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Eliminar este documento? Las copias de seguridad conservan su plazo de retención.'))return;try{await api('/file/'+b.dataset.deleteFile+'/delete','POST',{});await listDocuments(id);}catch(e){message(e.message);}});return d.documents;}
+async function listDocuments(id){const d=await api('/documents/'+id);document.getElementById('documents').innerHTML='<h2>Archivos registrados</h2>'+(d.documents.map(f=>`<div class="row">${['portrait','action'].includes(f.kind)?`<img class="rider-photo-thumb" src="/api/file/${encodeURIComponent(f.id)}?preview=1" alt="${f.kind==='portrait'?'Foto con equipación':'Foto en bicicleta'}" loading="lazy">`:''}<span>${esc(({contrato_club:'Contrato del club',dni:'DNI · anverso',dni_reverso:'DNI · reverso',licencia:'Licencia federativa · anverso',licencia_reverso:'Licencia federativa · reverso',portrait:'Foto con equipación',action:'Foto en bicicleta'})[f.kind]||f.kind)} · ${Math.round(f.size/1024)} KB</span><div><a href="/api/file/${f.id}">Descargar</a>${teamConsultation()?'':` <button data-delete-file="${f.id}">Eliminar</button>`}</div></div>`).join('')||'No hay documentos registrados.');document.querySelectorAll('[data-delete-file]').forEach(b=>b.onclick=async()=>{if(!confirm('¿Eliminar este documento? Las copias de seguridad conservan su plazo de retención.'))return;try{await api('/file/'+b.dataset.deleteFile+'/delete','POST',{});await listDocuments(id);}catch(e){message(e.message);}});return d.documents;}
 async function myClothesPage(c){
  const [kit,shop]=await Promise.all([api('/clothes/mine'),api('/shop')]);
  c.innerHTML=`<h1>Mi ropa</h1>${clothingCatalog()}<section class="card"><h2>Dotación del equipo</h2>
