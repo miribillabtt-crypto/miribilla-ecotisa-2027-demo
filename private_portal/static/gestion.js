@@ -1,8 +1,86 @@
 'use strict';
 
-async function gestionPage(content,runOCR=true){
+function gestionInvoiceForm(){
+ return `<details class="card" id="gestionIntake"><summary>Escanear o subir factura · ${esc(teamName(me.team))}</summary>
+ <form id="gestionInvoice"><div class="toolbar">
+ <button type="button" class="primary" id="gestionScan">Escanear con cámara</button>
+ <button type="button" id="gestionRead">Leer con OCR</button></div>
+ <p id="gestionIntakeStatus" role="status" aria-live="polite"></p><div class="grid">
+ <label>Factura o justificante · PDF, JPG, PNG o WEBP<input name="file" type="file" accept="application/pdf,image/jpeg,image/png,image/webp"></label>
+ <label>Concepto del gasto<input name="concept" maxlength="250" placeholder="Ej. gasolina para la Copa de España"></label>
+ <label>Fecha de factura<input name="date" type="date"></label>
+ <label>Proveedor<input name="supplier" maxlength="180"></label>
+ <label>NIF del proveedor<input name="taxId" maxlength="40"></label>
+ <label>Número de factura<input name="reference" maxlength="120"></label>
+ ${[['base','Base imponible (€)'],['tax','IVA (€)'],['amount','Total (€)']].map(([name,label])=>
+  `<label>${label}<input name="${name}" type="number" min="0" step="0.01"></label>`).join('')}
+ </div><button type="submit" class="primary">Enviar a Gestión para revisión</button></form></details>`;
+}
+
+function bindGestionIntake(content){
+ const form=content.querySelector('#gestionInvoice');
+ const status=content.querySelector('#gestionIntakeStatus');
+ const scan=content.querySelector('#gestionScan');
+ const read=content.querySelector('#gestionRead');
+ let original=null;
+ const attach=file=>{
+  original=file;
+  if(file)status.textContent='Adjuntado · '+file.name;
+ };
+ form.elements.file.onchange=()=>attach(form.elements.file.files[0]);
+ scan.onclick=async()=>{
+  scan.disabled=true;
+  try{
+   const file=await scanDocumentWithCamera();
+   if(file&&form.isConnected){form.elements.file.value='';attach(file);}
+  }catch(error){status.textContent=error.message;}
+  finally{scan.disabled=false;}
+ };
+ read.onclick=async()=>{
+  if(!original){status.textContent='Escanea o adjunta la factura primero.';return;}
+  const file=original;
+  read.disabled=true;
+  try{
+   const result=await InvoiceOCR.read(file,step=>{if(original===file)status.textContent=step;},{cancelled:false});
+   if(original!==file||!form.isConnected)return;
+   const data=InvoiceOCR.parse(result.text);
+   for(const [field,key] of Object.entries({date:'date',supplier:'counterparty',taxId:'taxId',reference:'reference',concept:'concept',base:'baseAmount',tax:'taxAmount',amount:'amount'})){
+    const value=data[key];
+    if(!form.elements[field].value&&(typeof value==='string'&&value||Number.isFinite(value))){
+     form.elements[field].value=typeof value==='number'?value.toFixed(2):value;
+    }
+   }
+   status.textContent='Revisa los datos leídos antes de enviar.';
+  }catch(error){status.textContent=error.message;}
+  finally{read.disabled=false;}
+ };
+ bindForm(form.id,async()=>{
+  if(!original)throw Error('Escanea o adjunta la factura primero.');
+  const payload=new FormData(form);
+  payload.set('file',original);
+  for(const key of ['base','tax','amount'])payload.set(key,Math.round(Number(payload.get(key)||0)*100));
+  const result=await api('/gestion/invoices','POST',payload);
+  if(!content.isConnected)return;
+  await gestionPage(content,false);
+  message(result.duplicate?'La factura ya está registrada.':'Factura enviada a Gestión y pendiente de revisar.');
+ });
+ return attach;
+}
+
+async function gestionPage(content,runOCR=true,scan=null){
  const {rows,archived,buckets,mailAccounts}=await api('/gestion');
  const sorted=rows.sort((a,b)=>b.date.localeCompare(a.date)||a.supplier.localeCompare(b.supplier,'es'));
+ if(!me.canManageGestion){
+  content.innerHTML=`<h1>Gestión · ${esc(teamName(me.team))}</h1>
+  ${gestionInvoiceForm()}<h2>Registros del equipo</h2>
+  ${sorted.map(row=>`<article class="card"><strong>${esc(row.supplier||row.concept||'Factura')}</strong>
+   <p>${esc([row.date,row.concept,row.status].filter(Boolean).join(' · '))} · ${row.amount?euros(row.amount):'Importe pendiente'}</p>
+   ${row.files.map(id=>`<a class="button" href="/api/gestion/file/${encodeURIComponent(id)}">Descargar original</a>`).join('')}
+  </article>`).join('')||'<p>Todavía no hay registros.</p>'}`;
+  const attach=bindGestionIntake(content);
+  if(scan){attach(scan);content.querySelector('#gestionIntake').open=true;}
+  return;
+ }
  content.innerHTML=`<h1>Gestión</h1><p>Contabilidad de Miribilla BTT Elkartea · CIF G95613758</p>
  <details class="card"><summary>Conectar Gmail</summary>
  <p>Configura un proyecto de Google Apps Script en cada cuenta y autoriza una vez la lectura de Gmail. El conector busca candidatos de Miribilla y carga el PDF para revisión.</p>
@@ -11,18 +89,9 @@ async function gestionPage(content,runOCR=true){
  <li>Ejecuta <code>conectarGestion</code> y autoriza el acceso en Google. El proyecto consultará el correo cada hora.</li></ol>
  <form id="gestionMailKey">${select('Buzón','account',mailAccounts)}<button type="submit">Generar clave de conexión</button></form>
  <div id="gestionMailKeyResult"></div></details>
- <details class="card"><summary>Añadir factura al buzón</summary>
- <form id="gestionInvoice"><div class="grid">
-  <label>PDF original<input name="file" type="file" accept="application/pdf,.pdf" required></label>
-  <label>Fecha de factura<input name="date" type="date" required></label>
-  <label>Proveedor<input name="supplier" maxlength="180" required></label>
-  <label>NIF del proveedor<input name="taxId" maxlength="40"></label>
-  <label>Número de factura<input name="reference" maxlength="120" required></label>
-  <label>Concepto<input name="concept" maxlength="250"></label>
-  ${[['base','Base imponible (€)'],['tax','IVA (€)'],['amount','Total (€)']].map(([key,label])=>
-    `<label>${label}<input name="${key}" type="number" min="0" step="0.01" ${key==='amount'?'required':''}></label>`).join('')}
- </div><button type="submit" class="primary">Guardar factura pendiente</button></form></details>
+ ${gestionInvoiceForm()}
  <div class="toolbar"><label>Buscar<input id="gestionSearch" type="search" placeholder="Proveedor, número o concepto"></label>
+ ${select('Equipo de origen','gestionOrigin',[['','Todos'],...Object.entries(buckets).filter(([key])=>key!=='common'),['gestion','Buzón de facturas']])}
  ${select('Asignado a','gestionBucket',[['','Todos'],['review','Pendientes de revisar'],['pending','Pendientes de asignar'],...Object.entries(buckets)])}
  <label>Mes<input id="gestionMonth" type="month"></label><a class="button" id="gestionExport" href="/api/gestion/export">Exportar contabilidad consolidada</a></div>
  <div class="toolbar"><button type="button" id="gestionRunOCR" class="primary">Leer facturas pendientes con OCR</button></div>
@@ -35,6 +104,7 @@ async function gestionPage(content,runOCR=true){
  const search=content.querySelector('#gestionSearch');
  const bucket=content.querySelector('[name="gestionBucket"]');
  const month=content.querySelector('#gestionMonth');
+ const origin=content.querySelector('[name="gestionOrigin"]');
  const list=content.querySelector('#gestionRows');
  const toCents=value=>Math.round(Number(value||0)*100);
  const fields=[
@@ -66,7 +136,7 @@ async function gestionPage(content,runOCR=true){
   const query=search.value.trim().toLocaleLowerCase('es');
   const pending=row=>!Object.keys(row.allocations).length;
   const matches=sorted.filter(row=>
-   (!month.value||row.date.startsWith(month.value))&&
+   (!month.value||row.date.startsWith(month.value))&&(!origin.value||row.team===origin.value)&&
    (!bucket.value||(bucket.value==='review'?row.needsReview:bucket.value==='pending'?pending(row):row.allocations[bucket.value]>0))&&
    [row.supplier,row.reference,row.concept].join(' ').toLocaleLowerCase('es').includes(query));
   const amount=row=>buckets[bucket.value]?row.allocations[bucket.value]:row.amount;
@@ -121,43 +191,40 @@ async function gestionPage(content,runOCR=true){
   action.onclick=()=>changeArchive(action,action.dataset.gestionRestore,true);
  }
  search.oninput=render;
- bucket.onchange=month.onchange=render;
- bindForm('gestionInvoice',async(form)=>{
-  const payload=new FormData(form);
-  for(const key of ['base','tax','amount'])payload.set(key,toCents(payload.get(key)));
-  const result=await api('/gestion/invoices','POST',payload);
-  await gestionPage(content);
-  message(result.duplicate?'La factura ya está registrada.':'Factura original guardada, pendiente de asignar.');
- });
+ bucket.onchange=month.onchange=origin.onchange=render;
+ const attach=bindGestionIntake(content);
+ if(scan){attach(scan);content.querySelector('#gestionIntake').open=true;}
  render();
  const pendingOCR=sorted.filter(row=>row.needsReview&&row.files.length&&(row.needsOCR||!row.amount));
  const button=content.querySelector('#gestionRunOCR');
  const status=content.querySelector('#gestionOCRStatus');
  button.disabled=!pendingOCR.length;
- status.textContent=pendingOCR.length?`${pendingOCR.length} PDF pendientes de lectura.`:'No hay PDF pendientes de lectura.';
+ status.textContent=pendingOCR.length?`${pendingOCR.length} archivos pendientes de lectura.`:'No hay archivos pendientes de lectura.';
  async function run(){
   button.disabled=true;
   const result=await prepareGestionOCR(pendingOCR,status);
   if(!status.isConnected||!result)return;
   const previousMonth=month.value;
   const previousSearch=search.value;
-  if(result.prepared||result.partial){
+  const previousOrigin=origin.value;
+  if((result.prepared||result.partial)&&!content.querySelector('#gestionIntake').open){
    await gestionPage(content,false);
    const nextMonth=content.querySelector('#gestionMonth');
    const nextSearch=content.querySelector('#gestionSearch');
    const nextBucket=content.querySelector('[name="gestionBucket"]');
    nextMonth.value=previousMonth;
    nextSearch.value=previousSearch;
+   content.querySelector('[name="gestionOrigin"]').value=previousOrigin;
    nextBucket.value='review';
    nextBucket.onchange();
   }else{
    button.disabled=false;
   }
   content.querySelector('#gestionOCRStatus').textContent=
-   `${result.prepared} borradores preparados.${result.partial?' '+result.partial+' con datos parciales guardados.':''}${result.failed?' '+result.failed+' PDF sin datos reconocibles.':''}`;
+   `${result.prepared} borradores preparados.${result.partial?' '+result.partial+' con datos parciales guardados.':''}${result.failed?' '+result.failed+' archivos sin datos reconocibles.':''}`;
  }
  button.onclick=()=>run().catch(error=>{if(status.isConnected){status.textContent=error.message;button.disabled=false;}});
- if(runOCR&&pendingOCR.some(row=>row.needsOCR))void button.onclick();
+ if(runOCR&&!scan&&pendingOCR.some(row=>row.needsOCR))void button.onclick();
 }
 
 async function prepareGestionOCR(rows,status){
@@ -166,7 +233,7 @@ async function prepareGestionOCR(rows,status){
  let partial=0;
  for(const row of rows){
   if(!status.isConnected)return;
-  const progress=`Leyendo PDF ${prepared+failed+partial+1} de ${rows.length}`;
+  const progress=`Leyendo factura ${prepared+failed+partial+1} de ${rows.length}`;
   status.textContent=progress;
   try{
    const url='/gestion/file/'+encodeURIComponent(row.files[0]);
@@ -176,7 +243,8 @@ async function prepareGestionOCR(rows,status){
    if(!Number.isFinite(data.amount)||data.amount<=0){
     const response=await fetch('/api'+url,{cache:'no-store'});
     if(!response.ok)throw Error('PDF no disponible');
-    const file=new File([await response.blob()],'factura.pdf',{type:'application/pdf'});
+    const blob=await response.blob();
+    const file=new File([blob],blob.type==='application/pdf'?'factura.pdf':'factura',{type:blob.type});
     const result=await InvoiceOCR.read(file,step=>{if(status.isConnected)status.textContent=progress+' · '+step;},{cancelled:false});
     const alternative=InvoiceOCR.parse(result.text);
     source=source+'\n'+result.text;
@@ -188,7 +256,7 @@ async function prepareGestionOCR(rows,status){
    const hasAmount=Number.isFinite(data.amount)&&data.amount>0;
    if(!source.trim()||(!hasAmount&&!data.reference&&!data.date&&!data.taxId&&!data.counterparty))throw Error('PDF sin datos reconocibles');
    const draft={date:data.date||row.date||'',counterparty:(data.counterparty||row.supplier||'').slice(0,180),
-     reference:data.reference||row.reference||'',taxId:data.taxId||row.taxId||'',concept:data.concept||row.concept||''};
+     reference:data.reference||row.reference||'',taxId:data.taxId||row.taxId||'',concept:row.concept||data.concept||''};
    for(const key of ['baseAmount','taxAmount','amount'])draft[key]=Number.isFinite(data[key])?Math.max(0,Math.round(data[key]*100)):({baseAmount:row.base,taxAmount:row.tax,amount:row.amount})[key]||0;
    await api('/gestion/'+encodeURIComponent(row.id)+'/review','POST',draft);
    if(hasAmount)prepared++;else partial++;

@@ -106,10 +106,26 @@ def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):
         db.delete(db.get(Record,booking))
     assert post('team',{'team':'netkom'}).status_code==200
     assert client.get('/api/resource-availability').json['vehicleBookings']==[]
-    assert post('modules/travel',{'event':netkom,'vehicles':[vehicle]}).status_code==200
+    assert post('modules/travel',{'event':netkom,'vehicles':[vehicle],'hotel':'Hotel de prueba'}).status_code==200
     assert post('team',{'team':'occident'}).status_code==200
     assert client.get('/api/resource-availability').json['vehicleBookings']==[
         {'team':'netkom','event':None,'date':'2027-03-03','endDate':'2027-03-03','vehicles':[vehicle]}]
+    assert post('vehicle-availability',reserve).status_code==409
+    assert post('vehicle-availability',dict(reserve,event=netkom)).status_code==404
+    assert post('team',{'team':'netkom'}).status_code==200
+    assert post('vehicle-availability',dict(reserve,event=netkom,status='Libre')).status_code==200
+    trip=client.get('/api/modules/travel').json['records'][0]
+    assert trip['vehicles']==[] and trip['hotel']=='Hotel de prueba'
+    assert post('vehicle-availability',dict(reserve,event=netkom)).status_code==200
+    assert client.get('/api/modules/travel').json['records'][0]['vehicles']==[vehicle]
+    assert post('vehicle-availability',dict(reserve,event=netkom,status='Libre')).status_code==200
+    assert post('team',{'team':'occident'}).status_code==200
+    assert post('vehicle-availability',reserve).status_code==200
+    assert post('team',{'team':'netkom'}).status_code==200
+    assert client.get('/api/resource-availability').json['vehicleBookings']==shared
+    assert post('team',{'team':'occident'}).status_code==200
+    assert post('vehicle-availability',dict(reserve,status='Libre')).status_code==200
+    assert client.get('/api/resource-availability').json['vehicleBookings']==[]
 
 def test_vehicle_reservation_without_activity_blocks_both_teams(env):
     app,_,login,_=env
@@ -138,7 +154,7 @@ def test_vehicle_reservation_without_activity_blocks_both_teams(env):
     shared=client.get('/api/resource-availability').json['vehicleBookings']
     assert shared==[{'team':'netkom','event':None,'date':'2027-05-01','endDate':'2027-05-02',
                     'vehicles':[vehicle],'direct':True,'usage':'trabajo'}]
-    assert change('DELETE',path).status_code==403
+    assert change('DELETE',path).status_code==404
     assert change('PUT',path,draft).status_code==403
     assert change('POST','team',{'team':'netkom'}).status_code==200
     assert change('POST','vehicle-reservations',dict(draft,date='2027-05-02')).status_code==409

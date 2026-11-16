@@ -12,6 +12,7 @@ from sqlalchemy import select, text
 from werkzeug.utils import secure_filename
 
 from bank_reconciliation import bank_lock
+from invoices import invoice_file_type
 from team_scope import TEAMS
 
 CENTRAL = 'gestion'
@@ -49,10 +50,12 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
             out.setdefault(kind[8:], []).append(file_id)
         return out
 
-    def rows(archived=False):
+    def rows(archived=False, team=None):
         kinds = ARCHIVED.values() if archived else ARCHIVED.keys()
-        entries = list(g.db.execute(all_teams(select(Record.id, Record.team, Record.kind, Record.data)
-                       .where(Record.kind.in_((*kinds, SPLIT))))))
+        query=select(Record.id, Record.team, Record.kind, Record.data).where(Record.kind.in_((*kinds, SPLIT)))
+        if team is not None:
+            query=query.where(Record.team==team)
+        entries=list(g.db.execute(all_teams(query)))
         splits = {row.id: unseal(row.data) for row in entries if row.kind == SPLIT}
         files = documents([row.id for row in entries if row.kind != SPLIT])
         for row in entries:
@@ -62,7 +65,7 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
             amount = data.get('amount', 0)
             split_id = 'gestion-allocation:' + row.id
             signed_direction = data.get('direction', 'Gasto')
-            split = splits.get(split_id, {row.team: amount} if row.team in TEAMS else {})
+            split = splits.get(split_id, {row.team: amount} if row.team in TEAMS and amount else {})
             if sum(split.values()) != amount:
                 split = {}
             yield dict(id=row.id, team=row.team, date=data.get('date',''), direction=signed_direction,
@@ -76,8 +79,10 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
     @app.get('/api/gestion')
     @require('director')
     def gestion_overview():
-        central_only()
-        return jsonify(rows=list(rows()), archived=list(rows(archived=True)), buckets=BUCKETS, mailAccounts=MAIL_ACCOUNTS)
+        central=can_manage_gestion(g.user)
+        return jsonify(rows=list(rows(team=None if central else g.team)),
+                       archived=list(rows(archived=True)) if central else [],
+                       buckets=BUCKETS, mailAccounts=MAIL_ACCOUNTS if central else [])
 
     @app.post('/api/gestion/<entry_id>/archive')
     @app.post('/api/gestion/<entry_id>/restore')
@@ -194,8 +199,11 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
     def store_invoice(owner, mail_account=None):
         file = request.files.get('file')
         raw = file.read(4*1024*1024+1) if file else b''
-        if not raw.startswith(b'%PDF-') or b'%%EOF' not in raw[-65536:] or len(raw)>4*1024*1024:
-            abort(400,'Adjunta el PDF original, de hasta 4 MB')
+        if not raw or len(raw)>4*1024*1024:
+            abort(400,'Adjunta una factura de hasta 4 MB')
+        mime,extension=invoice_file_type(raw)
+        if mail_account and mime!='application/pdf':
+            abort(400,'Adjunta el PDF original')
         supplier = invoice_field('supplier',180)
         reference = invoice_field('reference',120)
         tax_id = invoice_field('taxId',40)
@@ -204,8 +212,15 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
         if mail_account:
             supplier=reference=tax_id=issue_date=''
             amount=base=tax=0
-        else:
-            check_invoice_fields(issue_date,supplier,reference,amount,base,tax)
+        elif issue_date:
+            try:
+                if date.fromisoformat(issue_date).isoformat()!=issue_date:
+                    raise ValueError()
+            except ValueError:
+                abort(400,'Indica una fecha válida')
+        if amount and (base or tax) and base+tax!=amount:
+            abort(400,'La base y el IVA deben sumar el total')
+        source=CENTRAL if mail_account else g.team
         sha = hashlib.sha256(raw).hexdigest()
         lock()
         for row in g.db.execute(all_teams(select(Record.id,Record.kind,Record.data).where(
@@ -213,21 +228,21 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
             data=unseal(row.data)
             if data.get('sha256')==sha or invoice_matches(data,supplier,reference,tax_id):
                 return jsonify(duplicate=True)
-        entry = Record(kind=INBOX,team=CENTRAL,owner_id=owner,data=seal(dict(
+        entry = Record(kind=INBOX,team=source,owner_id=owner,data=seal(dict(
             date=issue_date, counterparty=supplier, reference=reference, taxId=tax_id,
             direction='Gasto', amount=amount, baseAmount=base,taxAmount=tax,
             concept=invoice_field('concept',250), status='Pendiente de revisar',
-            needsOCR=bool(mail_account), mailAccount=mail_account or '')))
+            needsOCR=bool(mail_account or not (issue_date and supplier and reference and amount)), mailAccount=mail_account or '')))
         g.db.add(entry)
         g.db.flush()
-        doc = Document(kind='invoice:'+entry.id,team=CENTRAL,owner_id=owner,
-                       size=len(raw),mime='application/pdf',created=int(time.time()),content=cipher.encrypt(raw))
+        doc = Document(kind='invoice:'+entry.id,team=source,owner_id=owner,
+                       size=len(raw),mime=mime,created=int(time.time()),content=cipher.encrypt(raw))
         g.db.add(doc)
         g.db.flush()
-        name=secure_filename(file.filename or '')[:140] or 'factura.pdf'
-        if not name.lower().endswith('.pdf'):
-            name += '.pdf'
-        g.db.add(Record(id='invoice-meta-'+doc.id,kind='invoice-metadata',team=CENTRAL,
+        name=secure_filename(file.filename or '')[:140] or 'factura'
+        if not name.lower().endswith(extension) and not (extension=='.jpg' and name.lower().endswith('.jpeg')):
+            name += extension
+        g.db.add(Record(id='invoice-meta-'+doc.id,kind='invoice-metadata',team=source,
                         owner_id=entry.id,data=seal(dict(filename=name,sha256=sha))))
         audit('gestion_invoice_received',entry.id)
         return jsonify(id=entry.id),201
@@ -235,7 +250,6 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
     @app.post('/api/gestion/invoices')
     @require('director')
     def gestion_upload():
-        central_only()
         return store_invoice(g.user.id)
 
     def check_invoice_fields(issue_date,supplier,reference,amount,base,tax):
@@ -326,9 +340,11 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
     @app.get('/api/gestion/file/<file_id>')
     @require('director')
     def gestion_download(file_id):
-        central_only()
-        doc=g.db.execute(all_teams(select(Document.id,Document.kind,Document.content,Document.mime)
-                         .where(Document.id==file_id))).first()
+        central=can_manage_gestion(g.user)
+        query=select(Document.id,Document.kind,Document.content,Document.mime).where(Document.id==file_id)
+        if not central:
+            query=query.where(Document.team==g.team)
+        doc=g.db.execute(all_teams(query)).first()
         if not doc or not doc.kind.startswith('invoice:'):
             abort(404)
         meta=g.db.execute(all_teams(select(Record.data).where(Record.id=='invoice-meta-'+file_id,

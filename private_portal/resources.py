@@ -150,9 +150,10 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         audit('vehicle_reservation_cancelled',row.id)
         return jsonify(ok=True)
 
+    @app.post('/api/vehicle-availability', defaults={'vehicle_matrix': True})
     @app.post('/api/resource-availability')
     @require('director')
-    def save_availability():
+    def save_availability(vehicle_matrix=False):
         data=body()
         event_id,resource_id,status=data.get('event'),data.get('resource'),data.get('status')
         if not isinstance(event_id,str) or not isinstance(resource_id,str):
@@ -163,17 +164,31 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         if not event or event.kind!='event' or not resource or resource.kind not in ('module:staff','module:vehicle'):
             abort(404)
         vehicle=resource.kind=='module:vehicle'
+        if vehicle_matrix and (not vehicle or status not in ('Libre','Reservado')):
+            abort(400)
         if status not in (('Libre','Reservado','Disponible','No disponible','Por confirmar') if vehicle else ('Disponible','No disponible','Por confirmar')):
             abort(400)
-        for travel in g.db.scalars(select(Record).where(Record.kind=='module:travel')):
-            trip=unseal(travel.data)
-            if trip.get('event')==event_id and resource_id in trip.get('staff',[])+trip.get('vehicles',[]):
-                abort(409,'El recurso ya está asignado. Modifica la ficha del viaje')
         key=availability_key(event_id,resource_id)
         record=g.db.get(Record,key)
         if vehicle and status in VEHICLE_RESERVED:
             check_manual_vehicle_booking(resource_bookings(g.db, Record, unseal),
                                          g.team, event_id, unseal(event.data), resource_id)
+        for travel in g.db.scalars(select(Record).where(Record.kind=='module:travel')):
+            trip=unseal(travel.data)
+            if trip.get('event')!=event_id:
+                continue
+            if vehicle_matrix:
+                vehicles=[item for item in trip.get('vehicles',[]) if item!=resource_id]
+                if status=='Reservado':
+                    vehicles.append(resource_id)
+                trip['vehicles']=vehicles
+                travel.data=seal(trip)
+                if record:
+                    g.db.delete(record)
+                audit('resource_availability_updated',resource_id)
+                return jsonify(ok=True)
+            if resource_id in trip.get('staff',[])+trip.get('vehicles',[]):
+                abort(409,'El recurso ya está asignado. Modifica la ficha del viaje')
         if vehicle and status in ('Libre','Disponible','Por confirmar'):
             if record:g.db.delete(record)
             audit('resource_availability_updated',resource_id)

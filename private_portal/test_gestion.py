@@ -1,6 +1,7 @@
 import io
 from test_security import env
 from server import User
+from PIL import Image
 from werkzeug.security import generate_password_hash
 
 def test_gestion(env):
@@ -10,7 +11,7 @@ def test_gestion(env):
                     documents=True,password=generate_password_hash('a-password-for-testing'),
                     profile=app.extensions['cipher'].encrypt(b'{}')))
     director,h=login('director')
-    assert director.get('/api/gestion').status_code==403
+    assert director.get('/api/gestion').json['rows']==[]
     browser=app.test_client()
     assert browser.post('/api/login',json={'email':'direccion','password':'a-password-for-testing'}).status_code==200
     headers={'X-CSRF-Token':browser.get('/api/me').json['csrf']}
@@ -41,7 +42,7 @@ def test_gestion(env):
     assert browser.post(review,json={**values,'approved':True},headers=headers).status_code==200
     assert b';Proveedor;123;' in browser.get('/api/gestion/export').data
     file='/api/gestion/file/'+source['files'][0]
-    assert director.get(file).status_code==403
+    assert director.get(file).status_code==404
     assert browser.get(file).data==b'%PDF-1.7\n%%EOF'
     split='/api/gestion/'+entry+'/allocation'
     assert browser.post(split,json={'amounts':{'occident':3000}},headers=headers).status_code==400
@@ -64,9 +65,6 @@ def test_gestion(env):
     archive='/api/gestion/'+entry+'/archive'
     csrf={'X-CSRF-Token':browser.get('/api/me').json['csrf']}
     assert director.post(archive,json={},headers=h).status_code==403
-    assert browser.post(archive,json={},headers=csrf).status_code==403
-    assert browser.post('/api/team',json={'team':'netkom'},headers=csrf).status_code==200
-    csrf={'X-CSRF-Token':browser.get('/api/me').json['csrf']}
     assert browser.post(archive,json={},headers=csrf).status_code==200
     overview=browser.get('/api/gestion').json
     assert entry not in [row['id'] for row in overview['rows']]
@@ -76,3 +74,25 @@ def test_gestion(env):
     assert browser.get(file).status_code==200
     assert browser.post('/api/gestion/'+entry+'/restore',json={},headers=csrf).status_code==200
     assert b';Proveedor;123;' in browser.get('/api/gestion/export').data
+
+    image=io.BytesIO()
+    Image.new('RGB',(8,8),'white').save(image,format='JPEG')
+    original=image.getvalue()
+    def scan_data():
+        return {'file':(io.BytesIO(original),'ticket.jpg'),'concept':'Gasolina del equipo'}
+    uploaded=browser.post('/api/gestion/invoices',data=scan_data(),headers=csrf)
+    assert uploaded.status_code==201,uploaded.json
+    rows=browser.get('/api/gestion').json['rows']
+    scan=next(row for row in rows if row['id']==uploaded.json['id'])
+    assert scan['team']=='occident' and scan['concept']=='Gasolina del equipo' and scan['needsOCR']
+    assert director.post('/api/gestion/invoices',data=scan_data(),headers=h).json['duplicate']
+    assert all(row['team']=='netkom' for row in director.get('/api/gestion').json['rows'])
+    scan_file='/api/gestion/file/'+scan['files'][0]
+    assert director.get(scan_file).status_code==404
+    downloaded=browser.get(scan_file)
+    assert downloaded.mimetype=='image/jpeg' and downloaded.data==original
+    assert browser.post('/api/gestion/'+scan['id']+'/review',json={**values,'reference':'scan-1',
+                         'concept':scan['concept'],'approved':True},headers=csrf).status_code==200
+    assert browser.post('/api/gestion/'+scan['id']+'/allocation',json={'amounts':{'common':6000}},headers=csrf).status_code==200
+    assert director.get('/api/gestion/export').status_code==403
+    assert 'Occident;Proveedor;scan-1;Gasolina del equipo' in browser.get('/api/gestion/export').get_data(as_text=True)

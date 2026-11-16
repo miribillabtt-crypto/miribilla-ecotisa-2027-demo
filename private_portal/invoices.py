@@ -5,6 +5,20 @@ from sqlalchemy import select,func
 from werkzeug.utils import secure_filename
 from PIL import Image
 
+def invoice_file_type(raw):
+ if raw.startswith(b'%PDF-'):
+  if b'%%EOF' not in raw[-65536:]:abort(400,'El PDF parece incompleto')
+  return 'application/pdf','.pdf'
+ formats={'JPEG':('image/jpeg','.jpg'),'PNG':('image/png','.png'),'WEBP':('image/webp','.webp')}
+ try:
+  with Image.open(io.BytesIO(raw)) as image:
+   mime,extension=formats[image.format]
+   if image.width*image.height>20_000_000:raise ValueError()
+   image.verify()
+ except (OSError,ValueError,KeyError,SyntaxError,Image.DecompressionBombError):
+  abort(400,'Usa un PDF o foto JPG, PNG o WEBP válida')
+ return mime,extension
+
 def register_invoices(app,Record,Document,cipher,seal,unseal,audit,require):
  def entry_or_404(entry_id):
   r=g.db.get(Record,entry_id)
@@ -25,15 +39,7 @@ def register_invoices(app,Record,Document,cipher,seal,unseal,audit,require):
   if not f:abort(400,'Selecciona el original')
   raw=f.read(4*1024*1024+1)
   if not raw or len(raw)>4*1024*1024:abort(400,'El original debe ocupar como máximo 4 MB')
-  if raw.startswith(b'%PDF-'):
-   if b'%%EOF' not in raw[-65536:]:abort(400,'El PDF parece incompleto')
-   mime='application/pdf';extension='.pdf'
-  else:
-   try:
-    im=Image.open(io.BytesIO(raw))
-    if im.format not in ('JPEG','PNG','WEBP') or im.width*im.height>20_000_000:abort(400,'Imagen no admitida')
-    fmt=im.format;im.verify();mime={'JPEG':'image/jpeg','PNG':'image/png','WEBP':'image/webp'}[fmt];extension={'JPEG':'.jpg','PNG':'.png','WEBP':'.webp'}[fmt]
-   except Exception:abort(400,'Usa un PDF o foto JPG, PNG o WEBP válida')
+  mime,extension=invoice_file_type(raw)
   sha=hashlib.sha256(raw).hexdigest()
   for old in g.db.scalars(select(Document).where(Document.kind=='invoice:'+entry_id)):
    meta=g.db.get(Record,'invoice-meta-'+old.id)

@@ -22,6 +22,7 @@ function directionSections(){
   ['Equipo',[['roster','Corredores']]],
   ['Calendario',[['calendar','Calendario']]],
   ['Recursos compartidos',[['resources','Técnicos'],['vehicles','Vehículos']]],
+  ['Gestión',[['gestion','Gestión']]],
  ];
  return [
   ['Inicio',[['home','Inicio']]],
@@ -30,7 +31,7 @@ function directionSections(){
   ['Equipo',[['roster','Corredores'],['licenses','Licencias'],['equipment','Material y medidas'],['clothes','Pedido de ropa'],['shop','Tienda'],['results','Resultados'],['days','Días de actividad'],['fines','Multas']]],
   ['Técnicos',[['resources','Disponibilidad de técnicos']]],
   ['Vehículos',[['vehicles','Reservas'],['vehiclefiles','Fichas de vehículos'],['vehiclelogs','Kilómetros e historial']]],
-  ...(me.canManageGestion?[['Gestión',[['gestion','Gestión']]]]:[]),
+  ['Gestión',[['gestion','Gestión']]],
   ['Contabilidad',[['conta','Ingresos y gastos'],['charges','Cobros por corredor'],['budgets','Presupuesto'],['clubsettlement','Liquidación mensual clubes'],['bank','Banco y conciliación']]],
   ['Comunicación',[['publications','Publicaciones'],['photos','Fotos autorizadas'],['whatsapp','Avisos por WhatsApp']]],
   ['Administración',[['users','Usuarios y accesos'],['archive','Archivados'],...(me.owner?[['audit','Registro de accesos']]:[])]],
@@ -49,7 +50,7 @@ function directionSubnav(sections){
  return `<div class="section-navigation"><strong>${title}</strong><div class="section-links" aria-label="Apartados de ${title}">${items.map(([id,label])=>`<button type="button" data-page="${id}" ${page===id?'aria-current="page" class="active"':''}>${label}</button>`).join('')}</div></div>`;
 }
 function shell(){const mobile=window.matchMedia?.('(max-width: 800px)').matches;const sections=me.role==='director'?directionSections():null;let groups=[];if(me.role==='runner')groups=[['Mi área',[['home','Inicio'],['calendar','Calendario del equipo'],['calls','Mis convocatorias'],['planning','Mi planning'],['profile','Mis datos y documentos'],['results','Mis resultados'],['days','Mis días de actividad'],['charges','Mis gastos y recibos'],['myclothes','Mi ropa'],['shop','Tienda'],['fines','Mis multas'],['publications','Mis publicaciones']]]];else if(me.role==='technician')groups=[['Área técnica',[['home','Inicio'],['calendar','Calendario del equipo'],['mine','Mi disponibilidad'],['calls','Convocatorias'],['planning','Planning y medios'],['resources','Disponibilidad de técnicos'],['spaces','Reservas de espacios'],['equipment','Material y medidas'],['results','Resultados'],['days','Días de actividad']]],['Vehículos',[['vehicles','Reservas'],['vehiclefiles','Fichas de vehículos'],['vehiclelogs','Kilómetros e historial']]]];else groups=[['Comunicación',[['home','Inicio'],['publications','Generar publicaciones'],['photos','Fotos autorizadas'],['whatsapp','Avisos por WhatsApp']]]];app.innerHTML=`<div class="portal-layout"><aside><div class="identity"><strong>${esc(me.name)}</strong><small>${esc(roles[me.role])}</small></div><button type="button" id="mobileMenu" aria-expanded="false" aria-controls="portalNavigation">☰ Menú</button><div id="portalNavigation"><nav aria-label="Menú del portal">${sections?directionNavigation(sections):groups.map(([title,items])=>`<details ${!mobile||items.some(([id])=>id===page)?'open':''}><summary>${title}</summary>${items.map(([id,label])=>`<button data-page="${id}" ${page===id?'aria-current="page"':''} class="${page===id?'active':''}">${label}</button>`).join('')}</details>`).join('')}</nav><button id="logout">Cerrar sesión</button></div></aside>
-${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${(!teamConsultation()&&['director','technician'].includes(me.role))?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'&&!teamConsultation()?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';vehicleBookingDay='';updateTeamHeader();login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
+${['director','runner','technician'].includes(me.role)?`<div class="mobile-actions" aria-label="Acciones rápidas"><button type="button" data-page="calendar">Calendario</button>${(!teamConsultation()&&['director','technician'].includes(me.role))?'<button type="button" data-page="vehiclelogs">Registrar km</button>':''}${me.role==='director'?'<button type="button" class="primary" id="mobileInvoice">Escanear factura</button>':''}</div>`:''}<main>${sections?directionSubnav(sections):''}<section id="content"></section></main></div>`;document.getElementById('logout').onclick=async()=>{try{await api('/logout','POST');me=null;csrf='';vehicleBookingDay='';updateTeamHeader();login();}catch(e){message(e.message);}};const menu=document.getElementById('mobileMenu');
 menu.onclick=()=>{
  const expanded=menu.getAttribute('aria-expanded')==='true';
  menu.setAttribute('aria-expanded',String(!expanded));
@@ -61,10 +62,8 @@ if(quick)quick.onclick=async()=>{
  try{
   const scan=await scanDocumentWithCamera();
   if(!scan)return;
-  await navigate('conta');
-  const editor=document.querySelector('#content .invoice-ocr');
-  if(editor?.attachScan)await editor.attachScan(scan);
-  else message('No se pudo abrir el editor de facturas.');
+  page='gestion';
+  await gestionPage(shell(),false,scan);
  }catch(error){message(error.message);}
  finally{quick.disabled=false;}
 };

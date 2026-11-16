@@ -517,7 +517,7 @@ async function shopPage(c){
 }
 async function resourcesPage(c){await resourceMatrix(c,'staff');}
 
-async function resourceMatrix(c,section){
+async function resourceMatrix(c,section,filters={}){
  const [calendar,staff,vehicles,travel,overrides]=await Promise.all([
   api('/events'),api('/modules/staff'),api('/modules/vehicle'),api('/modules/travel'),api('/resource-availability')
  ]);
@@ -538,7 +538,7 @@ async function resourceMatrix(c,section){
    if(other)return {label:'Reservado',style:'assigned',fixed:true,note:other.team!==me.team?teamName(other.team):events.find(item=>item.id===other.event)?.name||(other.direct?'Reserva sin actividad':'')};
    const assigned=(assignments.get(event.id)?.vehicles||[]).includes(resource.id);
    const manual=statusRows.some(row=>row.event===event.id&&row.resource===resource.id&&['Reservado','No disponible'].includes(row.status));
-   return assigned||manual?{label:'Reservado',style:'assigned',fixed:assigned}:{label:'Libre',style:'available',fixed:!event.date};
+   return assigned||manual?{label:'Reservado',style:'assigned',fixed:!event.date}:{label:'Libre',style:'available',fixed:!event.date};
   }
   if((assignments.get(event.id)?.[kind]||[]).includes(resource.id)){
    return {label:'Convocado',style:'assigned',fixed:true};
@@ -569,10 +569,16 @@ async function resourceMatrix(c,section){
    <label>Mes<input type="month" id="resourceMonth"></label><button type="button" id="resourceClear">Ver todo</button></div>
   ${section!=='staff'?'<div class="toolbar resource-legend"><span class="resource-state available">Libre</span><span class="resource-state assigned">Reservado</span></div>':''}
   ${section!=='vehicles'?'<div class="toolbar resource-legend"><span class="resource-state available">Disponible</span><span class="resource-state assigned">Convocado</span><span class="resource-state unavailable">No disponible</span><span class="resource-state pending">Por confirmar</span></div>':''}
-  <p>Abre una actividad pulsando su nombre.${section!=='staff'&&!teamConsultation()?' Las reservas del viaje se modifican en su ficha.':''}</p>
+  <p>Abre una actividad pulsando su nombre.${section!=='staff'&&me.role==='director'?' Cambia el estado del vehículo en la tabla.':''}</p>
   <div id="resourceTables"></div>`;
  const host=c.querySelector('#resourceTables');
  const search=c.querySelector('#resourceSearch'),month=c.querySelector('#resourceMonth');
+ search.value=filters.search||'';
+ month.value=filters.month||'';
+ const refresh=async()=>{
+  const scroll=host.querySelector('.resource-scroll')?.scrollLeft||0;
+  await resourceMatrix(c,section,{search:search.value,month:month.value,scroll});
+ };
  const newAccounts=c.querySelector('#createPendingTechnicians');
  if(newAccounts){
   const issued=[];
@@ -630,12 +636,13 @@ async function resourceMatrix(c,section){
       const dates=event.date+(event.endDate!==event.date?' – '+event.endDate:'');
       const team=teamName(event.team);
       return `<tr><th scope="row"><small>${esc(dates)}</small>Reserva sin actividad<small>${team}${event.reason?' · '+esc(event.reason):''}</small></th>
-      ${cols.map(vehicle=>event.vehicles.includes(vehicle.id)?`<td class="resource-cell assigned">Reservado<small>${vehicleUsage(event)}</small></td>`:'<td>—</td>').join('')}</tr>`;
+      ${cols.map(vehicle=>event.vehicles.includes(vehicle.id)?`<td class="resource-cell assigned">Reservado<small>${vehicleUsage(event)}</small>
+       ${me.role==='director'&&event.team===me.team&&event.id?`<button type="button" data-release-booking="${esc(event.id)}" aria-label="Liberar ${esc(vehicle.name+' · '+dates)}">Liberar</button>`:''}</td>`:'<td>—</td>').join('')}</tr>`;
      }
      return `<tr><th scope="row"><small>${esc(activityDateLabel(event))}${event.endDate&&event.endDate!==event.date?' – '+esc(event.endDate):''}</small><button type="button" data-resource-event="${esc(event.id)}">${esc(event.name)}</button></th>
     ${cols.map(resource=>{
      const cell=status(event,resource,kind);
-     return `<td class="resource-cell ${cell.style}">${me.role==='director'&&!teamConsultation()&&!cell.fixed?`<select data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
+     return `<td class="resource-cell ${cell.style}">${me.role==='director'&&(kind==='vehicles'||!teamConsultation())&&!cell.fixed?`<select data-resource-kind="${kind}" data-resource="${esc(resource.id)}" data-resource-activity="${esc(event.id)}" aria-label="${esc(resource.name+' · '+event.name)}">
        ${(kind==='vehicles'?['Libre','Reservado']:['Disponible','No disponible','Por confirmar']).map(label=>`<option ${cell.label===label?'selected':''}>${label}</option>`).join('')}
       </select>`:`<span>${esc(cell.label)}</span>`}${cell.note?`<small>${esc(cell.note)}</small>`:''}</td>`;
     }).join('')}</tr>`;}).join('')||`<tr><td colspan="${cols.length+1}">No hay registros con estos filtros.</td></tr>`}</tbody></table></div>`:'<p>Aún no hay recursos registrados. Añádelos desde sus fichas.</p>'}</section>`;
@@ -645,16 +652,26 @@ async function resourceMatrix(c,section){
    const content=shell();
    calendarPage(content,button.dataset.resourceEvent).catch(err=>message(err.message));
   });
+  host.querySelectorAll('[data-release-booking]').forEach(button=>button.onclick=async()=>{
+   if(!confirm('¿Cancelar esta reserva y liberar el vehículo?'))return;
+   button.disabled=true;
+   try{
+    await api('/vehicle-reservations/'+encodeURIComponent(button.dataset.releaseBooking),'DELETE');
+    await refresh();
+    message('Vehículo liberado.');
+   }catch(error){message(error.message);button.disabled=false;}
+  });
   host.querySelectorAll('[data-resource]').forEach(select=>select.onchange=async()=>{
    select.disabled=true;
    try{
     const update={event:select.dataset.resourceActivity,resource:select.dataset.resource,status:select.value};
-    await api('/resource-availability','POST',update);
-    if(['Libre','Reservado'].includes(update.status)){
-     await resourceMatrix(c,section);
+    if(select.dataset.resourceKind==='vehicles'){
+     await api('/vehicle-availability','POST',update);
+     await refresh();
      message('Reserva actualizada.');
      return;
     }
+    await api('/resource-availability','POST',update);
     const previous=statusRows.find(row=>row.event===update.event&&row.resource===update.resource);
     if(previous)Object.assign(previous,update);else statusRows.push(update);
     render();message('Disponibilidad guardada.');
@@ -666,6 +683,7 @@ async function resourceMatrix(c,section){
  search.oninput=render;month.onchange=render;
  c.querySelector('#resourceClear').onclick=()=>{search.value='';month.value='';render();};
  render();
+ if(filters.scroll)host.querySelector('.resource-scroll')?.scrollTo({left:filters.scroll});
  if(section==='vehicles')vehicleAvailability(c,resources.vehicles,events,vehicleBookings);
 }
 async function callsPage(c){
