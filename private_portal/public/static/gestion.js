@@ -148,14 +148,24 @@ async function prepareGestionOCR(rows,status){
   const progress=`Leyendo PDF ${prepared+failed+partial+1} de ${rows.length}`;
   status.textContent=progress;
   try{
-   const response=await fetch('/api/gestion/file/'+encodeURIComponent(row.files[0]),{cache:'no-store'});
-   if(!response.ok)throw Error('PDF no disponible');
-   const file=new File([await response.blob()],'factura.pdf',{type:'application/pdf'});
-   const result=await InvoiceOCR.read(file,step=>{if(status.isConnected)status.textContent=progress+' · '+step;},{cancelled:false});
+   const url='/gestion/file/'+encodeURIComponent(row.files[0]);
+   const embedded=await api(url+'?text=1').catch(()=>({text:''}));
+   let source=embedded.text||'';
+   let data=InvoiceOCR.parse(source);
+   if(!Number.isFinite(data.amount)||data.amount<=0){
+    const response=await fetch('/api'+url,{cache:'no-store'});
+    if(!response.ok)throw Error('PDF no disponible');
+    const file=new File([await response.blob()],'factura.pdf',{type:'application/pdf'});
+    const result=await InvoiceOCR.read(file,step=>{if(status.isConnected)status.textContent=progress+' · '+step;},{cancelled:false});
+    const alternative=InvoiceOCR.parse(result.text);
+    source=source+'\n'+result.text;
+    data=Object.fromEntries(Object.keys(alternative).map(key=>[
+     key,typeof alternative[key]==='number'?(Number.isFinite(data[key])?data[key]:alternative[key]):data[key]||alternative[key]
+    ]));
+   }
    if(!status.isConnected)return;
-   const data=InvoiceOCR.parse(result.text);
    const hasAmount=Number.isFinite(data.amount)&&data.amount>0;
-   if(!result.text.trim()||(!hasAmount&&!data.reference&&!data.date&&!data.taxId&&!data.counterparty))throw Error('PDF sin datos reconocibles');
+   if(!source.trim()||(!hasAmount&&!data.reference&&!data.date&&!data.taxId&&!data.counterparty))throw Error('PDF sin datos reconocibles');
    const draft={date:data.date||row.date||'',counterparty:(data.counterparty||row.supplier||'').slice(0,180),
      reference:data.reference||row.reference||'',taxId:data.taxId||row.taxId||'',concept:data.concept||row.concept||''};
    for(const key of ['baseAmount','taxAmount','amount'])draft[key]=Number.isFinite(data[key])?Math.max(0,Math.round(data[key]*100)):({baseAmount:row.base,taxAmount:row.tax,amount:row.amount})[key]||0;

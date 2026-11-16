@@ -309,6 +309,18 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
             abort(404)
         meta=g.db.execute(all_teams(select(Record.data).where(Record.id=='invoice-meta-'+file_id,
                             Record.kind=='invoice-metadata'))).scalar_one_or_none()
+        if request.args.get('text')=='1':
+            if doc.mime!='application/pdf':
+                return jsonify(text='')
+            import pdfplumber
+            try:
+                with pdfplumber.open(io.BytesIO(cipher.decrypt(doc.content)),pages=list(range(1,9))) as pdf:
+                    extracted='\n'.join((page.extract_text(layout=True) or '')[:20000] for page in pdf.pages)
+            except Exception as exc:
+                app.logger.info('Gestion PDF text unavailable: %s',type(exc).__name__)
+                extracted=''
+            audit('gestion_invoice_text_read',file_id)
+            return jsonify(text=extracted)
         audit('gestion_invoice_downloaded',file_id)
         return send_file(io.BytesIO(cipher.decrypt(doc.content)),mimetype=doc.mime,
                          as_attachment=True,download_name=(unseal(meta).get('filename') if meta else 'factura.pdf'))
