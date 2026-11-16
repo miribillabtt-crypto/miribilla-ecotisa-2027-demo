@@ -25,6 +25,8 @@ async function gestionPage(content,runOCR=true){
  <div class="toolbar"><label>Buscar<input id="gestionSearch" type="search" placeholder="Proveedor, número o concepto"></label>
  ${select('Asignado a','gestionBucket',[['','Todos'],['review','Pendientes de revisar'],['pending','Pendientes de asignar'],...Object.entries(buckets)])}
  <label>Mes<input id="gestionMonth" type="month"></label><a class="button" id="gestionExport" href="/api/gestion/export">Exportar contabilidad consolidada</a></div>
+ <div class="toolbar"><button type="button" id="gestionRunOCR" class="primary">Leer facturas pendientes con OCR</button></div>
+ <p id="gestionOCRStatus" role="status" aria-live="polite"></p>
  <div id="gestionTotals"></div><div id="gestionRows"></div>`;
  const search=content.querySelector('#gestionSearch');
  const bucket=content.querySelector('[name="gestionBucket"]');
@@ -74,7 +76,7 @@ async function gestionPage(content,runOCR=true){
     ${row.base||row.tax?`<p>Base ${euros(row.base)} · IVA ${euros(row.tax)}</p>`:''}
     <p>${allocations||'Pendiente de asignar'}</p>
     ${row.files.map((id,index)=>`<a class="button" href="/api/gestion/file/${encodeURIComponent(id)}">Descargar original ${row.files.length>1?index+1:''}</a>`).join('')}
-    ${row.needsReview?reviewForm(row):''}
+    ${row.needsReview?`<p>${row.needsOCR?'Pendiente de lectura OCR':row.amount>0?'Borrador pendiente de revisar':'Importe pendiente de revisar'}</p>${reviewForm(row)}`:''}
    ${row.amount>0&&!row.needsReview?`<form id="gestion-split-${esc(row.id)}"><h3>Reparto interno (€)</h3>
      <div class="grid">${Object.entries(buckets).map(([key,label])=>
        `<label>${esc(label)}<input name="${key}" type="number" min="0" step="0.01" value="${row.allocations[key]?row.allocations[key]/100:''}"></label>`).join('')}</div>
@@ -107,34 +109,59 @@ async function gestionPage(content,runOCR=true){
   message(result.duplicate?'La factura ya está registrada.':'Factura original guardada, pendiente de asignar.');
  });
  render();
- const pendingOCR=sorted.filter(row=>row.needsOCR&&row.files.length);
- if(runOCR&&pendingOCR.length)void prepareGestionOCR(content,pendingOCR);
+ const pendingOCR=sorted.filter(row=>row.needsReview&&row.files.length&&(row.needsOCR||!row.amount));
+ const button=content.querySelector('#gestionRunOCR');
+ const status=content.querySelector('#gestionOCRStatus');
+ button.disabled=!pendingOCR.length;
+ status.textContent=pendingOCR.length?`${pendingOCR.length} PDF pendientes de lectura.`:'No hay PDF pendientes de lectura.';
+ async function run(){
+  button.disabled=true;
+  const result=await prepareGestionOCR(pendingOCR,status);
+  if(!status.isConnected||!result)return;
+  const previousMonth=month.value;
+  const previousSearch=search.value;
+  if(result.prepared){
+   await gestionPage(content,false);
+   const nextMonth=content.querySelector('#gestionMonth');
+   const nextSearch=content.querySelector('#gestionSearch');
+   const nextBucket=content.querySelector('[name="gestionBucket"]');
+   nextMonth.value=previousMonth;
+   nextSearch.value=previousSearch;
+   nextBucket.value='review';
+   nextBucket.onchange();
+  }else{
+   button.disabled=false;
+  }
+  content.querySelector('#gestionOCRStatus').textContent=
+   `${result.prepared} borradores preparados.${result.failed?' '+result.failed+' PDF sin importe fiable. Puedes completar sus datos manualmente.':''}`;
+ }
+ button.onclick=()=>run().catch(error=>{if(status.isConnected){status.textContent=error.message;button.disabled=false;}});
+ if(runOCR&&pendingOCR.some(row=>row.needsOCR))void button.onclick();
 }
 
-async function prepareGestionOCR(content,rows){
+async function prepareGestionOCR(rows,status){
  let prepared=0;
  let failed=0;
  for(const row of rows){
-  if(!content.isConnected||!content.querySelector('#gestionRows'))return;
+  if(!status.isConnected)return;
+  const progress=`Leyendo PDF ${prepared+failed+1} de ${rows.length}`;
+  status.textContent=progress;
   try{
-   message('Leyendo facturas del buzón · '+(prepared+failed+1)+' de '+rows.length);
    const response=await fetch('/api/gestion/file/'+encodeURIComponent(row.files[0]),{cache:'no-store'});
    if(!response.ok)throw Error('PDF no disponible');
    const file=new File([await response.blob()],'factura.pdf',{type:'application/pdf'});
-   const result=await InvoiceOCR.read(file,()=>{},{cancelled:false});
-   if(!content.isConnected||!content.querySelector('#gestionRows'))return;
+   const result=await InvoiceOCR.read(file,step=>{if(status.isConnected)status.textContent=progress+' · '+step;},{cancelled:false});
+   if(!status.isConnected)return;
    const data=InvoiceOCR.parse(result.text);
-   const draft={date:data.date||'',counterparty:(data.counterparty||'').slice(0,180),
-     reference:data.reference||'',taxId:data.taxId||'',concept:data.concept||''};
+   if(!Number.isFinite(data.amount)||data.amount<=0)throw Error('Importe pendiente de revisar');
+   const draft={date:data.date||row.date||'',counterparty:(data.counterparty||row.supplier||'').slice(0,180),
+     reference:data.reference||row.reference||'',taxId:data.taxId||row.taxId||'',concept:data.concept||row.concept||''};
    for(const key of ['baseAmount','taxAmount','amount'])draft[key]=Number.isFinite(data[key])?Math.max(0,Math.round(data[key]*100)):0;
    await api('/gestion/'+encodeURIComponent(row.id)+'/review','POST',draft);
    prepared++;
   }catch{failed++;}
  }
- if(!content.isConnected||!content.querySelector('#gestionRows'))return;
- if(prepared&&!failed)await gestionPage(content);
- else if(prepared)await gestionPage(content,false);
- message(prepared+' facturas preparadas para revisar.'+(failed?' '+failed+' requieren completar los datos manualmente.':''));
+ return {prepared,failed};
 }
 
 async function teamAccountingPage(content){

@@ -270,7 +270,7 @@ def register_gestion(app, Record, Document, User, cipher, seal, unseal, audit, r
         if not row:
             abort(404)
         current=unseal(row.data)
-        if current.get('status')=='Revisada' or (not approved and not current.get('needsOCR')):
+        if current.get('status')=='Revisada' or (not approved and not current.get('needsOCR') and current.get('amount',0)>0):
             abort(409,'La factura ya se ha revisado o preparado')
         fields={}
         for key,limit in (('date',10),('counterparty',180),('reference',120),('concept',250),('taxId',40)):
