@@ -101,3 +101,23 @@ header:has(.occident-brand){background:#ac3d0d}
 @media(max-width:600px){.brand-lockup{flex-wrap:wrap}.brand-lockup>.team-switcher{margin-left:0}}
 
 .rider-photo-thumb{width:84px;height:64px;object-fit:cover;border-radius:6px}
+
+.communication-matrix{min-width:42rem}
+.communication-matrix th,.communication-matrix td{text-align:center;padding:1rem .75rem}
+.communication-matrix th:first-child{text-align:left}
+.communication-matrix thead th{background:#163451;color:white}
+.communication-matrix th.communication-occident{background:#9c400d}
+.communication-matrix th.communication-netkom{background:#123f9a}
+.communication-matrix th.communication-surne{background:#075488}
+.communication-matrix th.communication-escuela{background:#34363c}
+.communication-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,12rem),1fr));gap:1rem}
+.communication-gallery figure{margin:0;min-width:0}
+.communication-gallery img{display:block;width:100%;height:10rem;object-fit:contain;background:#f3f5f7;border-radius:.5rem}
+.communication-gallery figcaption{padding:.5rem 0}
+#editorialAgenda .row strong,#editorialAgenda .row small{display:block}
+#editorialEditor:not(:empty){margin:.75rem 0}
+#editorialAgenda .fc-event{cursor:pointer}
+@media(max-width:650px){
+ #editorialAgenda .fc-header-toolbar{flex-wrap:wrap;gap:.6rem}
+ #editorialAgenda .fc-toolbar-title{font-size:1.1rem}
+}

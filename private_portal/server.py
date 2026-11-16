@@ -1,5 +1,5 @@
 """Private team portal. No legacy demo credentials or public data imports."""
-import os, io, json, hashlib, secrets, time, datetime, logging
+import os, io, json, hashlib, secrets, time, datetime, logging, re
 from functools import wraps
 from flask import Flask, request, jsonify, g, send_file, render_template, abort
 from sqlalchemy import text as sql_text, create_engine, Column, String, Integer, Boolean, LargeBinary, Text, ForeignKey, select, func, delete, update
@@ -81,7 +81,6 @@ def create_app(test_config=None):
         try:
             with engine.begin() as connection:connection.execute(sql_text('CREATE SCHEMA IF NOT EXISTS mbb_private'))
         except Exception as exc:
-            import re
             detail=str(getattr(exc,'orig',type(exc).__name__))
             detail=re.sub(r'postgres(?:ql)?://\S+', '[connection]', detail)
             print('DB_START_ERROR: '+detail[:700],flush=True)
@@ -168,16 +167,23 @@ def create_app(test_config=None):
                 g.db.info['team']=g.team
         if request.path.startswith('/api/') and request.method not in ('GET','HEAD','OPTIONS') and g.login:
             if not secrets.compare_digest(request.headers.get('X-CSRF-Token',''),g.login.csrf):abort(403,'Recarga la sesión')
+            if g.user.role=='communication' and request.endpoint not in (
+                'logout','login','activate_start','activate_finish','upload','create_record','edit_record',
+                'communication_plan','communication_logos','communication_logo'
+            ):
+                abort(403,'Acceso limitado a Comunicación')
             vehicle_change = (
                 request.method=='POST' and request.path=='/api/vehicle-availability'
                 or request.method=='DELETE' and request.path.startswith('/api/vehicle-reservations/')
             )
+            editorial_change=request.endpoint in ('communication_plan','communication_logos','communication_logo')
             gestion_change = request.method=='POST' and (
+                (request.endpoint=='invite_communication' and (g.user.owner or g.user.id=='shared-direction')) or
                 request.endpoint=='gestion_upload' or
                 (can_manage_gestion(g.user) and request.endpoint in
                  ('gestion_allocate','gestion_archive','gestion_review','gestion_mail_key'))
             )
-            if (g.user.role=='director' and g.team!=NETKOM and not (vehicle_change or gestion_change) and
+            if (g.user.role=='director' and g.team!=NETKOM and not (vehicle_change or gestion_change or editorial_change) and
                     request.path not in ('/api/team','/api/logout','/api/login',
                                          '/api/activate/start','/api/activate/finish')):
                 abort(403,'Este equipo está en modo consulta. Gestiona los recursos desde Netkom.')
@@ -189,6 +195,9 @@ def create_app(test_config=None):
         response.headers['Referrer-Policy']='no-referrer'
         response.headers['X-Frame-Options']='DENY'
         response.headers['Content-Security-Policy']="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; worker-src 'self' blob: https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' blob:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        if getattr(g,'calendar_nonce',None):
+            response.headers['Content-Security-Policy']=response.headers['Content-Security-Policy'].replace(
+                "style-src 'self'", f"style-src 'self' 'nonce-{g.calendar_nonce}'")
         if getattr(g,'organization_nonce',None):
             response.headers['X-Frame-Options']='SAMEORIGIN'
             response.headers['Content-Security-Policy']=(
@@ -222,7 +231,9 @@ def create_app(test_config=None):
         receipt=app.config.get('ROSTER_IMPORT_RECEIPT')
         return jsonify(status='ok',rosterImported=receipt['total'],**health_details) if receipt else jsonify(status='ok',**health_details)
     @app.get('/')
-    def index():return render_template('index.html')
+    def index():
+        g.calendar_nonce=secrets.token_urlsafe(24)
+        return render_template('index.html',calendar_nonce=g.calendar_nonce)
     @app.get('/privacidad-bancaria')
     def bank_privacy():return render_template('bank_privacy.html')
     @app.get('/organizacion')
@@ -234,7 +245,7 @@ def create_app(test_config=None):
     @app.get('/api/me')
     def me():
         if not g.user:return jsonify(user=None)
-        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,teams=TEAMS,canSwitchTeam=g.user.id=='shared-direction',canManageGestion=can_manage_gestion(g.user),canInviteUsers=g.user.owner or (g.user.id=='shared-direction' and g.team in NEW_TEAMS),clothes=CLOTHES,fines=FINE_TYPES)
+        return jsonify(user={'id':g.user.id,'name':g.user.name,'email':g.user.email,'role':g.user.role,'documents':g.user.documents,'owner':g.user.owner},csrf=g.login.csrf,team=g.team,teams=TEAMS,canSwitchTeam=g.user.id=='shared-direction',canManageGestion=can_manage_gestion(g.user),canInviteCommunication=g.user.role=='director' and (g.user.owner or g.user.id=='shared-direction'),canInviteUsers=g.user.owner or (g.user.id=='shared-direction' and g.team in NEW_TEAMS),clothes=CLOTHES,fines=FINE_TYPES)
     @app.post('/api/team')
     @require('director')
     def switch_team():
@@ -454,6 +465,27 @@ def create_app(test_config=None):
             accounts.append(dict(name=name,username=username,password=password))
         return jsonify(accounts=sorted(accounts,key=lambda account:normalize(account['name'])),skipped=sorted(skipped))
 
+    @app.post('/api/communication/invite')
+    @require('director')
+    def invite_communication():
+        if not (g.user.owner or g.user.id=='shared-direction'):
+            abort(403,'Solo Dirección general puede crear accesos de Comunicación')
+        data=body()
+        email=text(data,'email',254).lower()
+        name=text(data,'name',100)
+        if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):
+            abort(400,'Revisa el nombre y el correo')
+        if g.db.scalar(select(User.id).where(User.email==email).execution_options(shared_resource_lookup=True)):
+            abort(409,'Ese usuario ya existe')
+        g.db.execute(delete(Invite).where(Invite.team==NETKOM,Invite.email==email,
+                     Invite.role=='communication',Invite.used==False).execution_options(shared_resource_lookup=True))
+        token=secrets.token_urlsafe(40)
+        invitation=Invite(team=NETKOM,token=digest(token),email=email,name=name,role='communication',
+                          documents=False,owner=False,secret=seal(pyotp.random_base32()),expires=int(time.time())+48*3600)
+        g.db.add(invitation)
+        audit('communication_invite_created',email)
+        return jsonify(token=token,expires=invitation.expires)
+
     @app.post('/api/invites')
     @require('director')
     def invite():
@@ -558,8 +590,8 @@ def create_app(test_config=None):
     def upload(target):
         kind=request.form.get('kind');f=request.files.get('file')
         if g.user.role=='communication':
-            target_user=g.db.get(User,target)
-            if not target_user or target_user.role!='runner' or kind not in PHOTO_TYPES or not unseal(target_user.profile).get('photoConsent'):abort(403)
+            target_user=g.db.scalar(select(User).where(User.id==target).execution_options(shared_resource_lookup=True))
+            if not target_user or not target_user.active or target_user.role!='runner' or kind not in PHOTO_TYPES or not unseal(target_user.profile).get('photoConsent'):abort(403)
         else:
             runner_target(target)
             if g.user.id!=target and not g.user.documents and kind not in PHOTO_TYPES:abort(403)
@@ -595,7 +627,7 @@ def create_app(test_config=None):
             except Exception:abort(400,'Imagen no válida')
         total=g.db.scalar(select(func.coalesce(func.sum(Document.size),0)))
         if total+len(raw)>400*1024*1024:abort(400,'Almacenamiento completo. Contacta con Dirección.')
-        d=Document(owner_id=target,kind=kind,size=len(raw),mime=mime,created=int(time.time()),content=cipher.encrypt(raw));g.db.add(d);g.db.flush();audit('document_uploaded',d.id);return jsonify(ok=True,id=d.id)
+        d=Document(team=target_user.team if g.user.role=='communication' else g.team,owner_id=target,kind=kind,size=len(raw),mime=mime,created=int(time.time()),content=cipher.encrypt(raw));g.db.add(d);g.db.flush();audit('document_uploaded',d.id);return jsonify(ok=True,id=d.id)
     @app.get('/api/file/<file_id>')
     @require()
     def file(file_id):
@@ -604,7 +636,8 @@ def create_app(test_config=None):
         u=g.db.get(User,d.owner_id)
         allowed=g.user.id==d.owner_id or (g.user.role=='director' and (g.user.documents or d.kind in PHOTO_TYPES))
         if d.kind.startswith('staff-dni:'):allowed=g.user.role=='director' and g.user.documents
-        if d.kind in PHOTO_TYPES and g.user.role=='communication':allowed=bool(unseal(u.profile).get('photoConsent'))
+        if g.user.role=='communication':
+            allowed=bool(d.kind in PHOTO_TYPES and u and u.active and unseal(u.profile).get('photoConsent'))
         if not allowed:abort(403)
         audit('document_downloaded',d.id)
         return send_file(io.BytesIO(cipher.decrypt(d.content)),mimetype=d.mime,as_attachment=not(d.kind in PHOTO_TYPES and request.args.get('preview')=='1'),download_name=d.kind+({'application/pdf':'.pdf','image/png':'.png'}.get(d.mime,'.jpg')))
@@ -620,7 +653,13 @@ def create_app(test_config=None):
     def events():
         rows=[]
         for r in g.db.scalars(select(Record).where(Record.kind=='event')):
-            data=unseal(r.data);responses=list(g.db.scalars(select(Record).where(Record.kind=='availability',Record.owner_id==r.id)))
+            data=unseal(r.data)
+            if g.user.role=='communication':
+                details={key:data.get(key,'') for key in ('name','date','endDate','month','place','category','callStatus')}
+                details.update(id=r.id,called=data.get('called',[]) if data.get('callStatus')=='Publicada' else [])
+                rows.append(details)
+                continue
+            responses=list(g.db.scalars(select(Record).where(Record.kind=='availability',Record.owner_id==r.id)))
             available={unseal(x.data)['user']:unseal(x.data)['status'] for x in responses}
             data.update(id=r.id,myStatus=available.get(g.user.id,'Por confirmar'))
             if g.user.role=='director':data['responses']=available
@@ -682,6 +721,7 @@ def create_app(test_config=None):
     @app.get('/api/roster')
     @require()
     def roster():
+        if g.user.role=='communication':abort(403,'Acceso limitado a Comunicación')
         # Never serialize ORM users: sensitive columns are deliberately excluded.
         inactive=request.args.get('status')=='inactive'
         if inactive and g.user.role!='director':abort(403)
@@ -834,6 +874,8 @@ def create_app(test_config=None):
     register_space_reservations(app,Record,seal,unseal,audit,require,body)
     from resources import register_resources
     register_resources(app,Record,seal,unseal,audit,require,body)
+    from communication import register_communication
+    register_communication(app,Record,User,Document,cipher,seal,unseal,audit,require,body)
     from modules import register_modules
     register_modules(app,Record,User,Document,seal,unseal,audit,require,body)
     register_gestion(app,Record,Document,User,cipher,seal,unseal,audit,require,body)
