@@ -839,7 +839,7 @@ function updateTeamHeader(){
 async function init(initialPage='home'){try{if(window.DemoPortal?.active&&!DemoPortal.role){DemoPortal.selector();return;}const fragment=new URLSearchParams(location.hash.slice(1));const token=fragment.get('activar');const data=await api('/me');me=data.user;csrf=data.csrf||'';
  if(me){me.team=data.team||'netkom';me.canSwitchTeam=Boolean(data.canSwitchTeam);me.canManageGestion=Boolean(data.canManageGestion);me.canInviteCommunication=Boolean(data.canInviteCommunication);me.canInviteUsers=Boolean(data.canInviteUsers);if(data.teams)portalTeams={...portalTeams,...data.teams};}
  updateTeamHeader();
- if(token){await activation(token);history.replaceState(null,'',location.pathname);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}
+ if(token){history.replaceState(null,'',location.pathname+location.search);await activation(token);return;}clothes=data.clothes||[];fineTypes=data.fines||[];if(!me){login();return;}
  if(fragment.has('lk')&&me.role==='director'){
   history.replaceState(null,'',location.pathname);
   let result;
