@@ -400,7 +400,7 @@ def create_app(test_config=None):
         if replace_all and ('name' in d or 'staffId' in d):abort(400)
         if g.db.get_bind().dialect.name=='postgresql':
             g.db.execute(sql_text('SELECT pg_advisory_xact_lock(20273004)'))
-        staff=g.db.scalars(select(Record).where(Record.kind=='module:staff').order_by(Record.id).with_for_update()).all()
+        staff=g.db.scalars(select(Record).where(Record.kind=='module:staff',Record.team==g.team).order_by(Record.id).with_for_update()).all()
         individual='staffId' in d
         if individual:
             staff_id=text(d,'staffId',40)

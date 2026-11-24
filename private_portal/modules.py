@@ -29,7 +29,11 @@ LICENSE_SIDES={'licencia':'Anverso','licencia_reverso':'Reverso'}
 def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  from club_settlement import register_club_settlement
  register_club_settlement(app,Record,unseal,require,audit)
- def rows(kind):return list(g.db.scalars(select(Record).where(Record.kind=='module:'+kind)))
+ def rows(kind, own_team=False):
+  query=select(Record).where(Record.kind=='module:'+kind)
+  if own_team and kind in ('staff','vehicle'):
+   query=query.where(Record.team==g.team)
+  return list(g.db.scalars(query))
  def license_documents(rider_id):
   documents=g.db.scalars(select(Document).where(Document.owner_id==rider_id,Document.kind.in_(list(LICENSE_SIDES)))
                          .order_by(Document.created.desc(),Document.id.desc()))
@@ -247,7 +251,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   allowed(kind)
   event_id=request.args.get('event') if kind=='entry' else None
   records=[]
-  for row in rows(kind):
+  for row in rows(kind,own_team=request.args.get('scope')=='team'):
    data=unseal(row.data)
    if event_id and (data.get('event')!=event_id or data.get('direction')!='Gasto'):continue
    if visible(kind,data):records.append(output(row,kind))
@@ -329,6 +333,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if kind=='bank':bank_lock()
   r=g.db.get(Record,record_id)
   if not r or r.kind!='module:'+kind:abort(404)
+  if kind in ('staff','vehicle') and r.team!=g.team:
+   abort(403,'Gestiona esta ficha desde su estructura')
   payload=body()
   previous=unseal(r.data) if kind=='entry' else None
   if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
@@ -357,6 +363,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if kind=='bank':bank_lock()
   r=g.db.get(Record,record_id)
   if not r or r.kind!='module:'+kind:abort(404)
+  if kind in ('staff','vehicle') and r.team!=g.team:
+   abort(403,'Gestiona esta ficha desde su estructura')
   r.kind='archived:'+kind;audit('module_archived:'+kind,r.id);return jsonify(ok=True)
  @app.post('/api/bank/import')
  @require('director')
@@ -387,6 +395,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   lock_travel()
   r=g.db.get(Record,record_id,with_for_update=True)
   if not r or not r.kind.startswith('archived:'):abort(404)
+  if r.kind in ('archived:staff','archived:vehicle') and r.team!=g.team:
+   abort(403,'Gestiona esta ficha desde su estructura')
   if r.kind=='archived:fine':
    r.kind='fine';audit('fine_restored',r.id);return jsonify(ok=True)
   if r.kind=='archived:event':
@@ -411,7 +421,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @require()
  def export_module(kind):
   allowed(kind);wb=Workbook();ws=wb.active;ws.title=kind[:31];keys=list(SPECS[kind]);ws.append(keys)
-  for r in rows(kind):
+  for r in rows(kind,own_team=request.args.get('scope')=='team'):
    d=unseal(r.data)
    if not visible(kind,d):continue
    d=output(r,kind);line=[]

@@ -67,15 +67,17 @@ def test_occident_isolated_and_shared(env):
     assert alex.get('/api/users').json['users'][0]['name']=='Alex Toledo'
     assert alex.post('/api/team',json={'team':'netkom'},headers={'X-CSRF-Token':info['csrf']}).status_code==403
     alex_headers={'X-CSRF-Token':info['csrf']}
-    assert alex.post('/api/modules/vehicle/'+vehicle,json={'name':'Furgo revisada'},headers=alex_headers).status_code==200
-    assert director.get('/api/modules/vehicle').json['records'][0]['name']=='Furgo revisada'
-    assert director.post('/api/modules/staff/'+staff,json={'name':'Técnico común','user':'original-link'},headers=h).status_code==200
-    assert alex.post('/api/modules/staff/'+staff,json={'name':'Técnico revisado'},headers=alex_headers).status_code==200
-    updated=director.get('/api/modules/staff').json['records'][0]
-    assert (updated['name'],updated['user'])==('Técnico revisado','original-link')
-    assert alex.post('/api/modules/staff/'+staff,json={'name':'Técnico revisado','user':'other-link'},headers=alex_headers).status_code==403
-    assert alex.post('/api/modules/staff',json={'name':'Técnico Occident'},headers=alex_headers).status_code==200
-    assert alex.post('/api/modules/vehicle/'+vehicle+'/archive',json={},headers=alex_headers).status_code==403
+    for kind, other_id in (('vehicle',vehicle),('staff',staff)):
+        assert alex.get('/api/modules/'+kind+'?scope=team').json['records']==[]
+        assert alex.post('/api/modules/'+kind+'/'+other_id,json={'name':'Cambio ajeno'},headers=alex_headers).status_code==403
+        own=alex.post('/api/modules/'+kind,json={'name':'Recurso Occident'},headers=alex_headers)
+        assert own.status_code==200,own.json
+        own_id=own.json['id']
+        assert alex.post('/api/modules/'+kind+'/'+own_id,json={'name':'Recurso revisado'},headers=alex_headers).status_code==200
+        assert alex.get('/api/modules/'+kind+'?scope=team').json['records'][0]['name']=='Recurso revisado'
+        assert director.post('/api/modules/'+kind+'/'+own_id,json={'name':'Cambio ajeno'},headers=h).status_code==403
+        assert {row['id'] for row in director.get('/api/modules/'+kind).json['records']}=={other_id,own_id}
+    assert alex.post('/api/modules/staff',json={'name':'Cuenta ajena','user':'other-link'},headers=alex_headers).status_code==403
     assert director.get('/api/events').json['events'][0]['name']=='Carrera privada de Netkom'
 
 def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):
