@@ -177,6 +177,11 @@ def create_app(test_config=None):
                 request.method=='POST' and request.path=='/api/vehicle-availability'
                 or request.method=='DELETE' and request.path.startswith('/api/vehicle-reservations/')
             )
+            resource_details_change = (
+                request.method == 'POST'
+                and request.endpoint in ('create_record', 'edit_record')
+                and (request.view_args or {}).get('kind') in ('staff', 'vehicle')
+            )
             editorial_change=request.endpoint in ('communication_plan','communication_logos','communication_logo')
             gestion_change = request.method=='POST' and (
                 (request.endpoint=='invite_communication' and (g.user.owner or g.user.id=='shared-direction')) or
@@ -184,7 +189,7 @@ def create_app(test_config=None):
                 (can_manage_gestion(g.user) and request.endpoint in
                  ('gestion_allocate','gestion_archive','gestion_review','gestion_mail_key'))
             )
-            if (g.user.role=='director' and g.team!=NETKOM and not (vehicle_change or gestion_change or editorial_change) and
+            if (g.user.role=='director' and g.team!=NETKOM and not (vehicle_change or resource_details_change or gestion_change or editorial_change) and
                     request.path not in ('/api/team','/api/logout','/api/login',
                                          '/api/activate/start','/api/activate/finish')):
                 abort(403,'Este equipo está en modo consulta. Gestiona los recursos desde Netkom.')

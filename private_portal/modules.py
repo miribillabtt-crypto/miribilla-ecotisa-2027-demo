@@ -1,6 +1,6 @@
 """Team modules: encrypted records, explicit role allowlists, no demo data."""
 import io,csv,datetime,time
-from team_scope import team_record_key
+from team_scope import NETKOM, team_record_key
 from decimal import Decimal,InvalidOperation
 from flask import g,request,jsonify,abort,send_file,Response
 from sqlalchemy import select
@@ -309,7 +309,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  @app.post('/api/modules/<kind>')
  @require()
  def create_record(kind):
-  allowed(kind,True);data=validate(kind,body())
+  allowed(kind,True)
+  data=validate(kind,body())
+  if kind=='staff' and g.team!=NETKOM and data['user']:
+   abort(403,'Gestiona el acceso del técnico desde Netkom')
   if kind=='bank':
    bank_lock()
    validate_bank_link(Record,unseal,data)
@@ -332,6 +335,11 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   if kind=='entry' and previous:
    for key in ('payerClub','paidBy','paymentDate','dueDate','allocationRule','miribillaPercent'):
     if key not in payload and key in previous:payload[key]=previous[key]
+  if kind=='staff' and g.team!=NETKOM:
+   linked_user=unseal(r.data).get('user','')
+   if 'user' in payload and payload['user']!=linked_user:
+    abort(403,'Gestiona el acceso del técnico desde Netkom')
+   payload['user']=linked_user
   data=validate(kind,payload,previous)
   if kind=='bank':
    validate_bank_link(Record,unseal,data,record_id)
