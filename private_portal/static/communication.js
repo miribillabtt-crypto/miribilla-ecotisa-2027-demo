@@ -13,6 +13,8 @@ function closeEditorialCalendar(){
 
 let communicationSelection = {view:'dashboard',team:'all',month:''};
 
+const racePhotoLink = '<a href="https://miribillaargazkilari.pages.dev/" target="_blank" rel="noopener noreferrer">Abrir galería Argazkilari ↗</a>';
+
 function communicationTeams(){
  const teams=me.role==='communication'||me.canInviteCommunication?portalTeams:{[me.team]:teamName(me.team)};
  return ['occident','netkom','surne','escuela'].filter(team=>teams[team]).map(team=>[team,teams[team]]);
@@ -27,7 +29,7 @@ async function communicationDashboard(content){
  const teams=communicationTeams();
  const {view,team}=communicationSelection;
  if(view==='dashboard'){
-  content.innerHTML=`<h1>Comunicación</h1><div class="card scroll">
+  content.innerHTML=`<h1>Comunicación</h1><div class="toolbar">${racePhotoLink}</div><div class="card scroll">
    <table class="communication-matrix"><thead><tr><th scope="col">Apartado</th>
    ${teams.map(([key,label])=>`<th scope="col" class="communication-${key}">${esc(label)}</th>`).join('')}</tr></thead>
    <tbody>${communicationViews.map(([key,label])=>`<tr><th scope="row">${label}</th>
@@ -55,6 +57,7 @@ async function communicationDashboard(content){
  content.innerHTML=`<button type="button" id="editorialHome">Volver a Comunicación</button>
   <h1>${title} · ${esc(team==='all'?'Todos los equipos':teamName(team))}</h1>
   <div class="toolbar">${select('Equipo','editorialTeam',view==='calendar'?[['all','Todos los equipos'],...teams]:teams,team)}</div>
+  ${view==='photos'?`<div class="toolbar">${racePhotoLink}</div>`:''}
   <div id="editorialContent"></div>`;
  content.querySelector('#editorialHome').onclick=()=>openCommunication('dashboard','all');
  content.querySelector('[name=editorialTeam]').onchange=e=>openCommunication(view,e.target.value);
