@@ -175,6 +175,8 @@ def create_app(test_config=None):
                 abort(403,'Acceso limitado a Comunicación')
             vehicle_change = (
                 request.method=='POST' and request.path=='/api/vehicle-availability'
+                or request.method=='POST' and (request.endpoint=='restore' or
+                    (request.endpoint=='archive_record' and (request.view_args or {}).get('kind')=='vehicle'))
                 or request.method=='DELETE' and request.path.startswith('/api/vehicle-reservations/')
             )
             resource_details_change = (

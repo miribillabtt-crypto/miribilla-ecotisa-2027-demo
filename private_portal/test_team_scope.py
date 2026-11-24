@@ -78,6 +78,24 @@ def test_occident_isolated_and_shared(env):
         assert director.post('/api/modules/'+kind+'/'+own_id,json={'name':'Cambio ajeno'},headers=h).status_code==403
         assert {row['id'] for row in director.get('/api/modules/'+kind).json['records']}=={other_id,own_id}
     assert alex.post('/api/modules/staff',json={'name':'Cuenta ajena','user':'other-link'},headers=alex_headers).status_code==403
+    assert alex.post('/api/modules/vehicle/'+vehicle+'/archive',json={},headers=alex_headers).status_code==403
+    assert director.post('/api/modules/vehicle/'+vehicle+'/archive',json={},headers=h).status_code==409
+    own_vehicle=alex.post('/api/modules/vehicle',json={'name':'Coche propio','transversal':False},headers=alex_headers).json['id']
+    def vehicle_ids(c):
+        return {row['id'] for row in c.get('/api/modules/vehicle').json['records']}
+    assert own_vehicle in vehicle_ids(alex)
+    assert own_vehicle not in vehicle_ids(director)
+    path='/api/modules/vehicle/'+own_vehicle
+    assert alex.post(path,json={'name':'Coche propio','transversal':True},headers=alex_headers).status_code==200
+    assert own_vehicle in vehicle_ids(director)
+    assert alex.post(path+'/archive',json={},headers=alex_headers).status_code==200
+    assert own_vehicle not in vehicle_ids(alex)
+    assert own_vehicle not in vehicle_ids(director)
+    assert own_vehicle in {row['id'] for row in alex.get('/api/archive?scope=vehicles').json['records']}
+    restore='/api/archive/'+own_vehicle+'/restore'
+    assert director.post(restore,json={},headers=h).status_code==403
+    assert alex.post(restore,json={},headers=alex_headers).status_code==200
+    assert own_vehicle in vehicle_ids(director)
     assert director.get('/api/events').json['events'][0]['name']=='Carrera privada de Netkom'
 
 def test_vehicle_bookings_are_shared_even_without_a_matching_activity(env):

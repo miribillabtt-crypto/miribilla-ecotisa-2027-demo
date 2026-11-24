@@ -1,6 +1,7 @@
 """Team modules: encrypted records, explicit role allowlists, no demo data."""
 import io,csv,datetime,time
 from team_scope import NETKOM, team_record_key
+from resources import ensure_vehicle_can_be_removed, vehicle_available_to
 from decimal import Decimal,InvalidOperation
 from flask import g,request,jsonify,abort,send_file,Response
 from sqlalchemy import select
@@ -10,7 +11,7 @@ from bank_reconciliation import bank_lock, bank_fingerprint, validate_bank_link
 # field types: string, int, money (integer cents stored), list of IDs.
 SPECS={
  'staff':dict(name='s',function='s',city='s',phone='s',notes='s',user='s'),
- 'vehicle':dict(name='s',plate='s',seats='i',driver='s',notes='s'),
+ 'vehicle':dict(name='s',plate='s',seats='i',driver='s',notes='s',transversal='bool'),
  'travel':dict(event='event',manager='s',hotel='s',hotelAddress='s',hotelPhone='s',booking='s',departureBilbao='s',departureZaragoza='s',meeting='s',plan='s',staff='staff[]',vehicles='vehicle[]',rooming='s',registrationDeadline='s',registrationStatus='s',registrationReference='s',routeUrl='url',scheduleUrl='url'),
  'result':dict(event='event',rider='runner',place='i',days='i',discipline='s',notes='s'),
  'days':dict(event='event',person='person',days='i',function='s',notes='s'),
@@ -33,7 +34,10 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   query=select(Record).where(Record.kind=='module:'+kind)
   if own_team and kind in ('staff','vehicle'):
    query=query.where(Record.team==g.team)
-  return list(g.db.scalars(query))
+  records=list(g.db.scalars(query))
+  if kind=='vehicle' and not own_team:
+   records=[row for row in records if vehicle_available_to(row,g.team,unseal)]
+  return records
  def license_documents(rider_id):
   documents=g.db.scalars(select(Document).where(Document.owner_id==rider_id,Document.kind.in_(list(LICENSE_SIDES)))
                          .order_by(Document.created.desc(),Document.id.desc()))
@@ -60,6 +64,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
   return False
  def output(row,kind):
   data=unseal(row.data)
+  if kind=='vehicle':data.setdefault('transversal',True)
   if kind=='travel' and g.user.role=='runner':data={k:v for k,v in data.items() if k not in {'rooming','booking','registrationReference','staff','vehicles'}}
   if kind=='entry':
    part=g.db.get(Record,data['budget']) if data.get('budget') else None
@@ -88,6 +93,9 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
     if typ=='posttype' and v not in ['Colectiva','Individual']:abort(400)
     if typ=='format' and v not in ['Cuadrado','Vertical','Story']:abort(400)
     if typ=='poststatus' and v not in ['Borrador','Aprobada']:abort(400)
+   elif typ=='bool':
+    v=d.get(key,(previous or {}).get(key,True))
+    if type(v) is not bool:abort(400,'Selecciona el ámbito del vehículo')
    elif typ=='i':
     if type(v)!=int or v<0 or v>100000:abort(400,'Número no válido: '+key)
    elif typ=='money':
@@ -117,6 +125,7 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
      else:
       r=g.db.get(Record,rid)
       if not r or r.kind!='module:'+ref:abort(400,'Recurso no válido')
+      if ref=='vehicle' and not vehicle_available_to(r,g.team,unseal):abort(400,'Vehículo no disponible para esta estructura')
    out[key]=v
   if kind=='entry':
    if out['direction']!='Gasto':out['budget']=''
@@ -149,6 +158,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
    if status and unseal(status.data)['status']=='No disponible':
     abort(409,'Uno de los recursos está marcado como no disponible para esta actividad')
    resource=g.db.get(Record,resource_id)
+   if resource_id in data.get('vehicles',[]) and (not resource or resource.kind!='module:vehicle' or not vehicle_available_to(resource,g.team,unseal)):
+    abort(409,'Vehículo no disponible para esta estructura')
    if resource and resource.kind=='module:staff':
     person=unseal(resource.data).get('user')
     if person and not status:
@@ -331,13 +342,14 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def edit_record(kind,record_id):
   allowed(kind,True)
   if kind=='bank':bank_lock()
-  r=g.db.get(Record,record_id)
+  if kind=='vehicle':lock_travel()
+  r=g.db.get(Record,record_id,with_for_update=kind=='vehicle')
   if not r or r.kind!='module:'+kind:abort(404)
   if kind in ('staff','vehicle') and r.team!=g.team:
    abort(403,'Gestiona esta ficha desde su estructura')
   payload=body()
-  previous=unseal(r.data) if kind=='entry' else None
-  if previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
+  previous=unseal(r.data) if kind in ('entry','vehicle') else None
+  if kind=='entry' and previous and 'budget' not in payload:payload['budget']=previous.get('budget','')
   if kind=='entry' and previous:
    for key in ('payerClub','paidBy','paymentDate','dueDate','allocationRule','miribillaPercent'):
     if key not in payload and key in previous:payload[key]=previous[key]
@@ -347,6 +359,8 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
     abort(403,'Gestiona el acceso del técnico desde Netkom')
    payload['user']=linked_user
   data=validate(kind,payload,previous)
+  if kind=='vehicle' and previous.get('transversal',True) and not data['transversal']:
+   ensure_vehicle_can_be_removed(g.db,Record,unseal,r,only_other_teams=True)
   if kind=='bank':
    validate_bank_link(Record,unseal,data,record_id)
    bank_import_id=unseal(r.data).get('bankImportId')
@@ -361,10 +375,12 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def archive_record(kind,record_id):
   allowed(kind,True)
   if kind=='bank':bank_lock()
-  r=g.db.get(Record,record_id)
+  if kind=='vehicle':lock_travel()
+  r=g.db.get(Record,record_id,with_for_update=kind=='vehicle')
   if not r or r.kind!='module:'+kind:abort(404)
   if kind in ('staff','vehicle') and r.team!=g.team:
    abort(403,'Gestiona esta ficha desde su estructura')
+  if kind=='vehicle':ensure_vehicle_can_be_removed(g.db,Record,unseal,r)
   r.kind='archived:'+kind;audit('module_archived:'+kind,r.id);return jsonify(ok=True)
  @app.post('/api/bank/import')
  @require('director')
@@ -388,13 +404,18 @@ def register_modules(app,Record,User,Document,seal,unseal,audit,require,body):
  def people():return jsonify(people=[dict(id=u.id,name=u.name,role=u.role) for u in g.db.scalars(select(User).where(User.active==True))])
  @app.get('/api/archive')
  @require('director')
- def archive():return jsonify(records=[dict(unseal(r.data),id=r.id,kind=r.kind.split(':',1)[1]) for r in g.db.scalars(select(Record).where(Record.kind.like('archived:%')))])
+ def archive():
+  query=select(Record).where(Record.kind.like('archived:%'))
+  if request.args.get('scope')=='vehicles':
+   query=query.where(Record.kind=='archived:vehicle',Record.team==g.team)
+  return jsonify(records=[dict(unseal(r.data),id=r.id,kind=r.kind.split(':',1)[1]) for r in g.db.scalars(query)])
  @app.post('/api/archive/<record_id>/restore')
  @require('director')
  def restore(record_id):
   lock_travel()
   r=g.db.get(Record,record_id,with_for_update=True)
   if not r or not r.kind.startswith('archived:'):abort(404)
+  if g.team!=NETKOM and r.kind!='archived:vehicle':abort(403)
   if r.kind in ('archived:staff','archived:vehicle') and r.team!=g.team:
    abort(403,'Gestiona esta ficha desde su estructura')
   if r.kind=='archived:fine':

@@ -58,6 +58,22 @@ def resource_bookings(db, Record, unseal):
     return bookings
 
 
+def vehicle_available_to(row, team, unseal):
+    return row.team == team or unseal(row.data).get('transversal', True)
+
+
+def ensure_vehicle_can_be_removed(db, Record, unseal, row, *, only_other_teams=False):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    today = datetime.now(ZoneInfo('Europe/Madrid')).date().isoformat()
+    for booking in resource_bookings(db, Record, unseal):
+        if only_other_teams and booking['team'] == row.team:
+            continue
+        if row.id in booking['vehicles'] and booking['endDate'] >= today:
+            abort(409, 'El vehículo tiene reservas vigentes. Revisa las reservas antes de cambiar su disponibilidad.')
+
+
 def check_manual_vehicle_booking(bookings, team, event, activity, vehicle):
     start = activity.get('date')
     if not start:abort(400, 'Indica la fecha de la actividad antes de reservar el vehículo')
@@ -86,7 +102,8 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         records = [unseal(row.data) for row in g.db.scalars(
             select(Record).where(Record.kind=='system:resource-availability'))]
         bookings = resource_bookings(g.db, Record, unseal)
-        vehicle_ids = set(g.db.scalars(select(Record.id).where(Record.kind=='module:vehicle')))
+        vehicle_ids = {row.id for row in g.db.scalars(select(Record).where(Record.kind=='module:vehicle'))
+                       if vehicle_available_to(row, g.team, unseal)}
         vehicles = []
         for booking in bookings:
             ids = [resource for resource in booking['vehicles'] if resource in vehicle_ids]
@@ -126,7 +143,8 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         row=g.db.get(Record,reservation_id,with_for_update=True) if reservation_id else None
         if reservation_id and (not row or row.kind!=VEHICLE_BOOKING or row.team!=g.team):abort(404)
         resource=g.db.get(Record,vehicle,with_for_update=True)
-        if not resource or resource.kind!='module:vehicle':abort(404,'Vehículo no disponible')
+        if not resource or resource.kind!='module:vehicle' or not vehicle_available_to(resource, g.team, unseal):
+            abort(404,'Vehículo no disponible')
         reservation=dict(vehicle=vehicle,date=start,endDate=end,reason=reason.strip(),usage=usage)
         bookings=resource_bookings(g.db,Record,unseal)
         check_manual_vehicle_booking((booking for booking in bookings if not reservation_id or booking.get('reservation')!=reservation_id),g.team,None,reservation,vehicle)
@@ -164,6 +182,8 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         if not event or event.kind!='event' or not resource or resource.kind not in ('module:staff','module:vehicle'):
             abort(404)
         vehicle=resource.kind=='module:vehicle'
+        if vehicle and not vehicle_available_to(resource, g.team, unseal):
+            abort(404, 'Vehículo no disponible')
         if vehicle_matrix and (not vehicle or status not in ('Libre','Reservado')):
             abort(400)
         if status not in (('Libre','Reservado','Disponible','No disponible','Por confirmar') if vehicle else ('Disponible','No disponible','Por confirmar')):
@@ -220,7 +240,7 @@ def register_resources(app, Record, seal, unseal, audit, require, body):
         if not isinstance(purpose, str) or len(purpose) > 250:
             abort(400, 'El motivo admite hasta 250 caracteres')
         vehicle = g.db.get(Record, vehicle_id, with_for_update=True)
-        if not vehicle or vehicle.kind != 'module:vehicle':
+        if not vehicle or vehicle.kind != 'module:vehicle' or not vehicle_available_to(vehicle, g.team, unseal):
             abort(404, 'Vehículo no disponible')
         for row in g.db.scalars(select(Record).where(Record.kind == 'system:vehicle-log')):
             log = unseal(row.data)
